@@ -60,6 +60,13 @@ is the outlier. ViT-L therefore remains pending the less-than-1% maximum
 accuracy gate even though the difference is consistent with accumulated
 float32 execution-order divergence.
 
+The encoder-stage probe on the outlier measured token preparation at
+0.000066132% relative L1, followed by 1.585155%, 2.540597%, 3.580917%, and
+3.148583% at normalized blocks 20 through 23. A two-pass variance experiment
+did not improve the result. This localizes the deviation to accumulated
+transformer float32 arithmetic rather than image preprocessing, position
+interpolation, feature-tap selection, or final resizing.
+
 The stable default deliberately keeps model weights, attention scores, and
 activations in float32 and uses the scalar-order Vulkan linear/convolution
 paths. Reduced-precision and alternate-tile selection are deferred to the
