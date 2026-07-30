@@ -90,6 +90,7 @@ endif()
 add_library(depth_anything_v1 SHARED
     src/dav1.cpp
     src/image.cpp
+    src/inferbridge_harness.cpp
 )
 add_library(depth_anything_v1::depth_anything_v1 ALIAS depth_anything_v1)
 
@@ -104,6 +105,7 @@ target_include_directories(depth_anything_v1
 target_compile_definitions(depth_anything_v1
     PRIVATE
         DAV1_BUILD_DLL
+        INFERBRIDGE_HARNESS_BUILDING_LIBRARY
         $<$<BOOL:${DAV1_WITH_VULKAN}>:DAV1_WITH_VULKAN=1>
 )
 set_target_properties(depth_anything_v1 PROPERTIES
@@ -137,6 +139,7 @@ install(TARGETS depth_anything_v1
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )
 install(FILES include/depth_anything_v1.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES include/inferbridge_harness.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
 if(DAV1_BUILD_TOOLS)
     add_executable(dav1_run tools/dav1_run.c)
@@ -170,6 +173,17 @@ if(DAV1_BUILD_TESTS)
     add_executable(dav1_c_abi_smoke tests/c_abi_smoke.c)
     target_link_libraries(dav1_c_abi_smoke PRIVATE depth_anything_v1)
     add_test(NAME dav1_c_abi_smoke COMMAND dav1_c_abi_smoke)
+
+    add_executable(dav1_harness_abi_smoke tests/harness_abi_smoke.c)
+    target_link_libraries(dav1_harness_abi_smoke PRIVATE depth_anything_v1)
+    add_test(NAME dav1_harness_abi_smoke COMMAND dav1_harness_abi_smoke)
+
+    add_executable(dav1_harness_full_graph tests/harness_full_graph.cpp)
+    target_compile_features(dav1_harness_full_graph PRIVATE cxx_std_17)
+    target_link_libraries(dav1_harness_full_graph PRIVATE depth_anything_v1)
+    add_test(NAME dav1_harness_full_graph COMMAND dav1_harness_full_graph)
+    set_tests_properties(
+        dav1_harness_full_graph PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(dav1_image_tests tests/image_tests.cpp src/image.cpp)
     target_include_directories(dav1_image_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")

@@ -193,6 +193,28 @@ answer its pre-runtime capability query. The transfer counters cover tensor
 upload/download staging and are used by the hardware test to prove that a GPU
 submission performs neither.
 
+## InferBridge binary harness
+
+The same `depth_anything_v1` library exports InferBridge harness ABI 1.0
+through `ibrh_get_api`; no adapter DLL is required. The vendored declaration
+in `include/inferbridge_harness.h` matches InferBridge's versioned public
+contract.
+
+The first integration slice advertises only host BGRA8 input and host
+depth-UNORM8 output. Submission is synchronous and serialized per model, so it
+truthfully reports no asynchronous, cancellation, external-synchronization,
+GPU-resource, or GPU-resident-output capability and a maximum of one in-flight
+job. The Vulkan neural graph still executes on the selected GPU; only the
+harness boundary stages host pixels and the final payload. Output memory is
+leased and remains valid after the caller releases the job.
+
+The existing D3D12/Vulkan resource API is deliberately not advertised through
+the harness yet: it implements the upstream RGB/cubic/raw-depth contract,
+whereas InferBridge requires BGR-as-channels, legacy-nearest resize,
+transposed processing dimensions, and normalized uint8 output. GPU capability
+will be enabled only after those exact semantics run end-to-end without host
+staging.
+
 ## Native ABI
 
 The exported surface is deliberately small:
