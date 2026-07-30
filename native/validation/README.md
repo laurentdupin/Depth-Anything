@@ -54,18 +54,24 @@ On the same 20-image size-140 gate against CPU float32:
 - Canonical `pytorch_model.bin` SHA-256:
   `6fda5199f0043e91e1c6117df00313db57c630d8ed0306070b43da1ecfffbd9d`
 
-The size-140 gate currently has relative L1 minimum 0.040307%, median
-0.206830%, and maximum 1.530824%. Nineteen images are below 0.373%; one image
-is the outlier. ViT-L therefore remains pending the less-than-1% maximum
-accuracy gate even though the difference is consistent with accumulated
-float32 execution-order divergence.
+The original size-140 gate exposed one 1.530824% outlier. Encoder-stage
+probing localized the divergence to the final transformer blocks. The cause
+was not generic float32 reduction order: the native shader implemented
+tanh-approximate GELU while the pinned PyTorch graph uses exact-erf GELU.
+Replacing it with a high-accuracy erf formulation reduced the worst raw
+relative L1 across all 22 assets to 0.002397%.
 
-The encoder-stage probe on the outlier measured token preparation at
-0.000066132% relative L1, followed by 1.585155%, 2.540597%, 3.580917%, and
-3.148583% at normalized blocks 20 through 23. A two-pass variance experiment
-did not improve the result. This localizes the deviation to accumulated
-transformer float32 arithmetic rather than image preprocessing, position
-interpolation, feature-tap selection, or final resizing.
+The deployed InferBridge contract was also checked separately, including its
+nearest resize, BGR channel interpretation, width/height ordering, min-max
+normalization, and uint8 conversion. The worst results were:
+
+| GPU | Raw relative L1 | Normalized relative L1 | Normalized max pixel | uint8 max delta |
+|---|---:|---:|---:|---:|
+| Radeon RX 9070 | 0.027619% | 0.019658% | 0.038007% | 1 |
+| GeForce GTX 1080 | 0.021980% | 0.015664% | 0.030205% | 1 |
+| Radeon RX 6700 XT | 0.023355% | 0.016607% | 0.032026% | 1 |
+
+All ViT-L checks now pass the less-than-1% requirement on all three GPUs.
 
 The stable default deliberately keeps model weights, attention scores, and
 activations in float32 and uses the scalar-order Vulkan linear/convolution
@@ -78,7 +84,7 @@ Build/test gates:
   passes when `DAV1_VITS_MODEL` names the derived model.
 - no-Vulkan build: 2 tests passed.
 
-## Pending
+## Remaining validation
 
-ViT-L and the multi-size matrix still require the same end-to-end accuracy
-gate. Native capability must not be advertised for a variant before it passes.
+The correctness capability gate passes for ViT-S, ViT-B, and ViT-L. Broader
+multi-size performance measurements remain part of the optimization phase.
