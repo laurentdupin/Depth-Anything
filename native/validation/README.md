@@ -72,6 +72,10 @@ normalization, and uint8 conversion. The worst results were:
 | Radeon RX 6700 XT | 0.023355% | 0.016607% | 0.032026% | 1 |
 
 All ViT-L checks now pass the less-than-1% requirement on all three GPUs.
+The additive `dav1_get_inferbridge_shape` and
+`dav1_inferbridge_bgra8_u8` image ABI was then exercised directly on the
+same 22 images. Its final uint8 payload differs from Python CPU by at most
+one level; the legacy-nearest float scale edge case is covered by a unit test.
 
 The stable default deliberately keeps model weights, attention scores, and
 activations in float32 and uses the scalar-order Vulkan linear/convolution

@@ -214,6 +214,18 @@ DAV1_API dav1_status DAV1_CALL dav1_get_network_shape(
     int32_t input_size,
     dav1_image_shape* network_shape);
 
+/*
+ * Returns the output shape used by the deployed InferBridge Python template.
+ * That template passes Resize.get_size()'s (width, height) tuple directly to
+ * torch.interpolate's (height, width) argument, so non-square dimensions are
+ * intentionally transposed relative to dav1_get_network_shape().
+ */
+DAV1_API dav1_status DAV1_CALL dav1_get_inferbridge_shape(
+    int32_t image_width,
+    int32_t image_height,
+    int32_t input_size,
+    dav1_image_shape* output_shape);
+
 DAV1_API dav1_status DAV1_CALL dav1_create(
     const char* model_path_utf8,
     const dav1_create_options* options,
@@ -280,6 +292,22 @@ DAV1_API dav1_status DAV1_CALL dav1_infer_bgr8(
     ptrdiff_t row_stride_bytes,
     int32_t input_size,
     float* output_depth,
+    size_t output_count);
+
+/*
+ * Exact deployed InferBridge image contract. Input is interleaved BGRA8.
+ * Bytes B, G, R are deliberately interpreted as model channels 0, 1, 2;
+ * resize is PyTorch legacy nearest; output is independently min/max
+ * normalized, multiplied by 255, and truncated to uint8.
+ */
+DAV1_API dav1_status DAV1_CALL dav1_inferbridge_bgra8_u8(
+    dav1_context* context,
+    const uint8_t* bgra,
+    int32_t image_width,
+    int32_t image_height,
+    ptrdiff_t row_stride_bytes,
+    int32_t input_size,
+    uint8_t* output_depth,
     size_t output_count);
 
 /*

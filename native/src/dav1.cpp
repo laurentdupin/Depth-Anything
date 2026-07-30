@@ -3,6 +3,7 @@
 #include "executor.h"
 #include "image.h"
 
+#include <algorithm>
 #include <atomic>
 #include <exception>
 #include <memory>
@@ -15,6 +16,7 @@ struct dav1_context {
     std::shared_ptr<dav1::Executor> executor;
     dav1::ImageScratch image_scratch;
     std::vector<float> image_input;
+    std::vector<float> image_output;
 };
 
 struct dav1_gpu_job {
@@ -148,6 +150,22 @@ dav1_status DAV1_CALL dav1_get_network_shape(
             dav1::network_shape(image_width, image_height, input_size);
         network_shape->width = shape.width;
         network_shape->height = shape.height;
+    });
+}
+
+dav1_status DAV1_CALL dav1_get_inferbridge_shape(
+    int32_t image_width,
+    int32_t image_height,
+    int32_t input_size,
+    dav1_image_shape* output_shape) {
+    if (output_shape == nullptr) {
+        return fail(DAV1_STATUS_INVALID_ARGUMENT, "output_shape is null");
+    }
+    return protect([&] {
+        const dav1::ImageShape shape =
+            dav1::network_shape(image_width, image_height, input_size);
+        output_shape->width = shape.height;
+        output_shape->height = shape.width;
     });
 }
 
@@ -601,6 +619,60 @@ dav1_status DAV1_CALL dav1_infer_bgr8(
             output_depth,
             image_width,
             image_height);
+    });
+}
+
+dav1_status DAV1_CALL dav1_inferbridge_bgra8_u8(
+    dav1_context* context,
+    const uint8_t* bgra,
+    int32_t image_width,
+    int32_t image_height,
+    ptrdiff_t row_stride_bytes,
+    int32_t input_size,
+    uint8_t* output_depth,
+    size_t output_count) {
+    if (context == nullptr || bgra == nullptr || output_depth == nullptr) {
+        return fail(DAV1_STATUS_INVALID_ARGUMENT, "null inference argument");
+    }
+    return protect([&] {
+        const dav1::ImageShape upstream =
+            dav1::network_shape(image_width, image_height, input_size);
+        const dav1::ImageShape output_shape{
+            upstream.height, upstream.width};
+        const size_t required =
+            static_cast<size_t>(output_shape.width) * output_shape.height;
+        if (output_count < required) {
+            throw ApiError(
+                DAV1_STATUS_BUFFER_TOO_SMALL,
+                "output buffer is too small");
+        }
+        dav1::preprocess_inferbridge_bgra8(
+            bgra,
+            image_width,
+            image_height,
+            row_stride_bytes,
+            output_shape,
+            context->image_input);
+        context->image_output.resize(required);
+        context->executor->infer(
+            context->image_input.data(),
+            output_shape.width,
+            output_shape.height,
+            context->image_output.data());
+        const auto bounds = std::minmax_element(
+            context->image_output.begin(), context->image_output.end());
+        const float minimum = *bounds.first;
+        const float span = *bounds.second - minimum;
+        if (!(span > 0.0f)) {
+            std::fill_n(output_depth, required, uint8_t{0});
+            return;
+        }
+        for (size_t index = 0; index < required; ++index) {
+            const float normalized =
+                (context->image_output[index] - minimum) / span * 255.0f;
+            output_depth[index] = static_cast<uint8_t>(
+                std::clamp(normalized, 0.0f, 255.0f));
+        }
     });
 }
 
