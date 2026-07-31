@@ -25,19 +25,13 @@ struct ibrh_model {
 };
 
 struct ibrh_job {
-    std::atomic<uint32_t> references{1u};
     dav1_gpu_job* gpu_job = nullptr;
     uint64_t source_frame_id = 0u;
     uint64_t timestamp_ns = 0u;
     uint32_t width = 0u;
     uint32_t height = 0u;
     uint32_t state = IBRH_JOB_COMPLETE;
-    std::vector<uint8_t> depth;
-};
-
-struct ibrh_output_lease {
-    ibrh_job* job = nullptr;
-    dav1_gpu_output_lease* gpu_lease = nullptr;
+    std::vector<float> depth;
 };
 
 namespace {
@@ -181,12 +175,8 @@ ibrh_result status_result(dav1_status status) {
     }
 }
 
-void retain_job(ibrh_job* job) {
-    (void)job->references.fetch_add(1u);
-}
-
 void release_job(ibrh_job* job) {
-    if (job != nullptr && job->references.fetch_sub(1u) == 1u) {
+    if (job != nullptr) {
         if (job->gpu_job != nullptr) dav1_gpu_job_release(job->gpu_job);
         delete job;
     }
@@ -328,6 +318,61 @@ void IBRH_CALL model_unload(ibrh_model* model) {
     delete model;
 }
 
+ibrh_result IBRH_CALL model_describe_io(
+    const ibrh_model* model, size_t descriptor_size,
+    ibrh_model_io_descriptor* descriptor) {
+    if (!model || !descriptor) return IBRH_ERROR_INVALID_ARGUMENT;
+    if (descriptor_size < sizeof(*descriptor)) return IBRH_ERROR_STRUCT_TOO_SMALL;
+    *descriptor = {};
+    descriptor->struct_size = sizeof(*descriptor);
+    descriptor->api_version = IBRH_CURRENT_API_VERSION;
+    descriptor->input_count = 1u;
+    descriptor->output_count = 1u;
+    return IBRH_OK;
+}
+
+ibrh_result IBRH_CALL model_get_port(
+    const ibrh_model* model, uint32_t direction, uint32_t index,
+    size_t descriptor_size, ibrh_port_descriptor* descriptor) {
+    if (!model || !descriptor) return IBRH_ERROR_INVALID_ARGUMENT;
+    if (descriptor_size < sizeof(*descriptor)) return IBRH_ERROR_STRUCT_TOO_SMALL;
+    if (index != 0u || (direction != IBRH_PORT_INPUT && direction != IBRH_PORT_OUTPUT))
+        return IBRH_ERROR_NOT_FOUND;
+    *descriptor = {};
+    descriptor->struct_size = sizeof(*descriptor);
+    descriptor->api_version = IBRH_CURRENT_API_VERSION;
+    descriptor->index = 0u;
+    descriptor->direction = direction;
+    descriptor->semantic = direction == IBRH_PORT_INPUT ? IBRH_SEMANTIC_IMAGE : IBRH_SEMANTIC_DEPTH;
+    descriptor->payload_type = direction == IBRH_PORT_INPUT ? IBRH_PIXEL_BGRA8 : IBRH_PIXEL_DEPTH_FLOAT32;
+    descriptor->pixel_format = descriptor->payload_type;
+    descriptor->accepted_pixel_format_mask = direction == IBRH_PORT_INPUT
+        ? (1ull << IBRH_PIXEL_BGRA8) | (1ull << IBRH_PIXEL_RGBA8)
+        : (1ull << IBRH_PIXEL_DEPTH_FLOAT32);
+    descriptor->resource_kind = IBRH_RESOURCE_KIND_IMAGE_2D;
+    descriptor->depth = 1u;
+    descriptor->flags = IBRH_DESCRIPTOR_DYNAMIC_WIDTH | IBRH_DESCRIPTOR_DYNAMIC_HEIGHT;
+    return IBRH_OK;
+}
+
+ibrh_result IBRH_CALL model_plan_outputs(
+    const ibrh_model* model, size_t request_size,
+    const ibrh_output_plan_request* request, uint32_t capacity,
+    ibrh_port_descriptor* outputs) {
+    if (!model || !request || !outputs) return IBRH_ERROR_INVALID_ARGUMENT;
+    if (request_size < sizeof(*request) || request->struct_size < sizeof(*request) || capacity < 1u)
+        return IBRH_ERROR_STRUCT_TOO_SMALL;
+    if (request->input_count != 1u || !request->inputs ||
+        !request->inputs[0].width || !request->inputs[0].height)
+        return IBRH_ERROR_INVALID_ARGUMENT;
+    const auto result = model_get_port(model, IBRH_PORT_OUTPUT, 0u, sizeof(outputs[0]), &outputs[0]);
+    if (result != IBRH_OK) return result;
+    outputs[0].width = request->inputs[0].width;
+    outputs[0].height = request->inputs[0].height;
+    outputs[0].flags = 0u;
+    return IBRH_OK;
+}
+
 ibrh_result IBRH_CALL submit(
     ibrh_model* model, size_t request_size,
     const ibrh_submit_request* request, ibrh_job** output) {
@@ -337,13 +382,18 @@ ibrh_result IBRH_CALL submit(
     if (request_size < sizeof(*request) ||
         request->struct_size < sizeof(*request))
         return IBRH_ERROR_STRUCT_TOO_SMALL;
-    if (request->input_count != 1u || request->inputs == nullptr)
+    if (request->input_count != 1u || request->inputs == nullptr ||
+        request->output_count != 1u || request->outputs == nullptr)
         return fail(
             model->runtime, IBRH_ERROR_INVALID_ARGUMENT,
             "DAV1 requires exactly one BGRA8 input");
-    const ibrh_resource& input = request->inputs[0];
-    if (input.struct_size < sizeof(input))
+    const ibrh_transfer_binding& input_binding = request->inputs[0];
+    const ibrh_transfer_binding& output_binding = request->outputs[0];
+    if (input_binding.struct_size < sizeof(input_binding) ||
+        output_binding.struct_size < sizeof(output_binding))
         return IBRH_ERROR_STRUCT_TOO_SMALL;
+    const ibrh_resource& input = input_binding.resource;
+    const ibrh_resource& output_resource = output_binding.resource;
     uint32_t size = model->input_size;
     if (!input_size(copy_string(request->parameters_json), size, size))
         return fail(
@@ -352,12 +402,8 @@ ibrh_result IBRH_CALL submit(
     if (input.domain == IBRH_RESOURCE_DOMAIN_D3D12 &&
         input.kind == IBRH_RESOURCE_KIND_IMAGE_2D &&
         input.native_handle_type == IBRH_NATIVE_HANDLE_WIN32_SHARED) {
-        if (request->synchronization_count != 0u &&
-            request->synchronizations == nullptr)
-            return fail(
-                model->runtime, IBRH_ERROR_INVALID_ARGUMENT,
-                "DAV1 synchronization array is missing");
-        if (input.pixel_format != IBRH_PIXEL_BGRA8 ||
+        if ((input.pixel_format != IBRH_PIXEL_BGRA8 &&
+             input.pixel_format != IBRH_PIXEL_RGBA8) ||
             input.native_handle == 0u || input.width == 0u ||
             input.height == 0u ||
             input.width > static_cast<uint32_t>(
@@ -367,36 +413,33 @@ ibrh_result IBRH_CALL submit(
             return fail(
                 model->runtime, IBRH_ERROR_INVALID_ARGUMENT,
                 "DAV1 D3D12 texture input is invalid");
-        const ibrh_synchronization* wait = nullptr;
-        for (uint32_t index = 0u;
-             index < request->synchronization_count; ++index) {
-            const ibrh_synchronization& candidate =
-                request->synchronizations[index];
-            if (candidate.struct_size < sizeof(candidate))
-                return IBRH_ERROR_STRUCT_TOO_SMALL;
-            if (candidate.kind == IBRH_SYNC_D3D12_FENCE &&
-                candidate.operation == IBRH_SYNC_WAIT &&
-                candidate.native_handle_type ==
-                    IBRH_NATIVE_HANDLE_WIN32_SHARED) {
-                if (wait != nullptr)
-                    return fail(
-                        model->runtime, IBRH_ERROR_INVALID_ARGUMENT,
-                        "DAV1 received multiple D3D12 wait fences");
-                wait = &candidate;
-            }
-        }
-        if (wait == nullptr || wait->native_handle == 0u)
+        const auto& wait = input_binding.synchronization;
+        const auto& signal = output_binding.synchronization;
+        if (wait.kind != IBRH_SYNC_D3D12_FENCE || wait.operation != IBRH_SYNC_WAIT ||
+            wait.native_handle_type != IBRH_NATIVE_HANDLE_WIN32_SHARED || !wait.native_handle ||
+            output_resource.domain != IBRH_RESOURCE_DOMAIN_D3D12 ||
+            output_resource.kind != IBRH_RESOURCE_KIND_IMAGE_2D ||
+            output_resource.native_handle_type != IBRH_NATIVE_HANDLE_WIN32_SHARED ||
+            output_resource.pixel_format != IBRH_PIXEL_DEPTH_FLOAT32 ||
+            output_resource.width != input.width || output_resource.height != input.height ||
+            !output_resource.native_handle ||
+            signal.kind != IBRH_SYNC_D3D12_FENCE || signal.operation != IBRH_SYNC_SIGNAL ||
+            signal.native_handle_type != IBRH_NATIVE_HANDLE_WIN32_SHARED || !signal.native_handle)
             return fail(
                 model->runtime, IBRH_ERROR_INVALID_ARGUMENT,
-                "DAV1 D3D12 texture input requires a wait fence");
-        const dav1_d3d12_texture_submit_request native_request{
+                "DAV1 D3D12 bindings are invalid");
+        const dav1_d3d12_texture_binding_request native_request{
             sizeof(native_request), DAV1_ABI_VERSION,
             input.native_handle, input.width, input.height,
-            DAV1_GPU_PIXEL_BGRA8, static_cast<int32_t>(size),
-            wait->native_handle, wait->value,
+            static_cast<uint32_t>(input.pixel_format == IBRH_PIXEL_BGRA8
+                ? DAV1_GPU_PIXEL_BGRA8 : DAV1_GPU_PIXEL_RGBA8),
+            static_cast<int32_t>(size),
+            wait.native_handle, wait.value,
+            output_resource.native_handle, output_resource.width, output_resource.height,
+            signal.native_handle, signal.value,
             request->source_frame_id, request->timestamp_ns};
         dav1_gpu_job* native_job = nullptr;
-        const dav1_status status = dav1_submit_d3d12_texture(
+        const dav1_status status = dav1_submit_d3d12_texture_binding(
             model->context, &native_request, &native_job);
         if (status != DAV1_STATUS_OK || native_job == nullptr)
             return fail(
@@ -418,14 +461,11 @@ ibrh_result IBRH_CALL submit(
         *output = job;
         return IBRH_OK;
     }
-    if (request->synchronization_count != 0u)
-        return fail(
-            model->runtime, IBRH_ERROR_UNSUPPORTED_CAPABILITY,
-            "DAV1 host input does not accept external synchronization");
     if (input.domain != IBRH_RESOURCE_DOMAIN_HOST ||
         input.kind != IBRH_RESOURCE_KIND_IMAGE_2D ||
         input.native_handle_type != IBRH_NATIVE_HANDLE_HOST_POINTER ||
-        input.pixel_format != IBRH_PIXEL_BGRA8 ||
+        (input.pixel_format != IBRH_PIXEL_BGRA8 &&
+         input.pixel_format != IBRH_PIXEL_RGBA8) ||
         input.native_handle == 0u || input.width == 0u ||
         input.height == 0u || input.width > UINT32_MAX / 4u ||
         input.row_stride_bytes < input.width * 4u ||
@@ -436,20 +476,20 @@ ibrh_result IBRH_CALL submit(
             model->runtime, IBRH_ERROR_UNSUPPORTED_CAPABILITY,
             "DAV1 harness requires a valid host BGRA8 image");
     }
-    dav1_image_shape shape{};
-    dav1_status status = dav1_get_inferbridge_shape(
-        static_cast<int32_t>(input.width),
-        static_cast<int32_t>(input.height),
-        static_cast<int32_t>(size),
-        &shape);
-    if (status != DAV1_STATUS_OK)
-        return fail(model->runtime, status_result(status), dav1_last_error());
+    if (output_resource.domain != IBRH_RESOURCE_DOMAIN_HOST ||
+        output_resource.kind != IBRH_RESOURCE_KIND_IMAGE_2D ||
+        output_resource.native_handle_type != IBRH_NATIVE_HANDLE_HOST_POINTER ||
+        output_resource.pixel_format != IBRH_PIXEL_DEPTH_FLOAT32 ||
+        output_resource.width != input.width || output_resource.height != input.height ||
+        output_resource.row_stride_bytes < input.width * sizeof(float) ||
+        !output_resource.native_handle)
+        return fail(model->runtime, IBRH_ERROR_INVALID_ARGUMENT, "DAV1 host output binding is invalid");
     auto* job = new (std::nothrow) ibrh_job();
     if (job == nullptr) return IBRH_ERROR_INTERNAL;
     job->source_frame_id = request->source_frame_id;
     job->timestamp_ns = request->timestamp_ns;
-    job->width = static_cast<uint32_t>(shape.width);
-    job->height = static_cast<uint32_t>(shape.height);
+    job->width = input.width;
+    job->height = input.height;
     try {
         job->depth.resize(
             static_cast<size_t>(job->width) * job->height);
@@ -459,22 +499,37 @@ ibrh_result IBRH_CALL submit(
     }
     const auto* bgra = reinterpret_cast<const uint8_t*>(
         static_cast<uintptr_t>(input.native_handle)) + input.byte_offset;
+    std::vector<uint8_t> bgr(static_cast<size_t>(input.width) * input.height * 3u);
+    for (uint32_t y = 0; y < input.height; ++y)
+        for (uint32_t x = 0; x < input.width; ++x) {
+            const auto* source = bgra + static_cast<size_t>(y) * input.row_stride_bytes + x * 4u;
+            auto* target = bgr.data() + (static_cast<size_t>(y) * input.width + x) * 3u;
+            if (input.pixel_format == IBRH_PIXEL_BGRA8) {
+                target[0] = source[0]; target[1] = source[1]; target[2] = source[2];
+            } else {
+                target[0] = source[2]; target[1] = source[1]; target[2] = source[0];
+            }
+        }
     {
         std::lock_guard<std::mutex> lock(model->submit_mutex);
-        status = dav1_inferbridge_bgra8_u8(
-            model->context, bgra,
+        const dav1_status status = dav1_infer_bgr8(
+            model->context, bgr.data(),
             static_cast<int32_t>(input.width),
             static_cast<int32_t>(input.height),
-            input.row_stride_bytes,
+            static_cast<ptrdiff_t>(input.width) * 3,
             static_cast<int32_t>(size),
             job->depth.data(), job->depth.size());
+        if (status != DAV1_STATUS_OK) {
+            const std::string message = std::string("DAV1 inference failed: ") + dav1_last_error();
+            delete job;
+            return fail(model->runtime, status_result(status), message);
+        }
     }
-    if (status != DAV1_STATUS_OK) {
-        const std::string message =
-            std::string("DAV1 inference failed: ") + dav1_last_error();
-        delete job;
-        return fail(model->runtime, status_result(status), message);
-    }
+    auto* destination = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(output_resource.native_handle)) + output_resource.byte_offset;
+    for (uint32_t y = 0; y < input.height; ++y)
+        std::memcpy(destination + static_cast<size_t>(y) * output_resource.row_stride_bytes,
+            job->depth.data() + static_cast<size_t>(y) * input.width,
+            static_cast<size_t>(input.width) * sizeof(float));
     *output = job;
     return IBRH_OK;
 }
@@ -520,102 +575,6 @@ void IBRH_CALL job_release(ibrh_job* job) {
     release_job(job);
 }
 
-ibrh_result IBRH_CALL output_acquire(
-    ibrh_job* job, uint32_t output_index, size_t descriptor_size,
-    ibrh_output_descriptor* descriptor, ibrh_output_lease** output) {
-    if (job == nullptr || descriptor == nullptr || output == nullptr)
-        return IBRH_ERROR_INVALID_ARGUMENT;
-    *output = nullptr;
-    if (descriptor_size < sizeof(*descriptor))
-        return IBRH_ERROR_STRUCT_TOO_SMALL;
-    if (output_index != 0u) return IBRH_ERROR_NOT_FOUND;
-    auto* lease = new (std::nothrow) ibrh_output_lease();
-    if (lease == nullptr) return IBRH_ERROR_INTERNAL;
-    if (job->gpu_job != nullptr) {
-        dav1_d3d12_texture_output_descriptor native_descriptor{
-            sizeof(native_descriptor), DAV1_ABI_VERSION,
-            0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
-        dav1_gpu_output_lease* native_lease = nullptr;
-        const dav1_status status = dav1_gpu_texture_output_acquire(
-            job->gpu_job, output_index, &native_descriptor, &native_lease);
-        if (status != DAV1_STATUS_OK || native_lease == nullptr) {
-            delete lease;
-            return status_result(status);
-        }
-        lease->gpu_lease = native_lease;
-        *descriptor = {};
-        descriptor->struct_size = sizeof(*descriptor);
-        descriptor->api_version = IBRH_CURRENT_API_VERSION;
-        descriptor->output_index = output_index;
-        descriptor->payload_type = IBRH_PIXEL_DEPTH_FLOAT32;
-        descriptor->source_frame_id = native_descriptor.source_frame_id;
-        descriptor->timestamp_ns = native_descriptor.timestamp_ns;
-        descriptor->resource.struct_size = sizeof(descriptor->resource);
-        descriptor->resource.api_version = IBRH_CURRENT_API_VERSION;
-        descriptor->resource.domain = IBRH_RESOURCE_DOMAIN_D3D12;
-        descriptor->resource.kind = IBRH_RESOURCE_KIND_IMAGE_2D;
-        descriptor->resource.access = IBRH_RESOURCE_ACCESS_READ;
-        descriptor->resource.pixel_format = IBRH_PIXEL_DEPTH_FLOAT32;
-        descriptor->resource.width = native_descriptor.width;
-        descriptor->resource.height = native_descriptor.height;
-        descriptor->resource.depth = 1u;
-        descriptor->resource.row_stride_bytes =
-            native_descriptor.width * sizeof(float);
-        descriptor->resource.byte_size =
-            static_cast<uint64_t>(native_descriptor.width) *
-            native_descriptor.height * sizeof(float);
-        descriptor->resource.native_handle_type =
-            IBRH_NATIVE_HANDLE_WIN32_SHARED;
-        descriptor->resource.native_handle =
-            native_descriptor.shared_texture_handle;
-        descriptor->ready.struct_size = sizeof(descriptor->ready);
-        descriptor->ready.api_version = IBRH_CURRENT_API_VERSION;
-        descriptor->ready.kind = IBRH_SYNC_D3D12_FENCE;
-        descriptor->ready.operation = IBRH_SYNC_WAIT;
-        descriptor->ready.native_handle_type =
-            IBRH_NATIVE_HANDLE_WIN32_SHARED;
-        descriptor->ready.native_handle = native_descriptor.ready_fence_handle;
-        descriptor->ready.value = native_descriptor.ready_fence_value;
-        *output = lease;
-        return IBRH_OK;
-    }
-    retain_job(job);
-    lease->job = job;
-    *descriptor = {};
-    descriptor->struct_size = sizeof(*descriptor);
-    descriptor->api_version = IBRH_CURRENT_API_VERSION;
-    descriptor->output_index = 0u;
-    descriptor->payload_type = IBRH_PIXEL_DEPTH_UNORM8;
-    descriptor->source_frame_id = job->source_frame_id;
-    descriptor->timestamp_ns = job->timestamp_ns;
-    descriptor->resource.struct_size = sizeof(descriptor->resource);
-    descriptor->resource.api_version = IBRH_CURRENT_API_VERSION;
-    descriptor->resource.domain = IBRH_RESOURCE_DOMAIN_HOST;
-    descriptor->resource.kind = IBRH_RESOURCE_KIND_IMAGE_2D;
-    descriptor->resource.access = IBRH_RESOURCE_ACCESS_READ;
-    descriptor->resource.pixel_format = IBRH_PIXEL_DEPTH_UNORM8;
-    descriptor->resource.width = job->width;
-    descriptor->resource.height = job->height;
-    descriptor->resource.depth = 1u;
-    descriptor->resource.row_stride_bytes = job->width;
-    descriptor->resource.byte_size = job->depth.size();
-    descriptor->resource.native_handle_type =
-        IBRH_NATIVE_HANDLE_HOST_POINTER;
-    descriptor->resource.native_handle = static_cast<uint64_t>(
-        reinterpret_cast<uintptr_t>(job->depth.data()));
-    *output = lease;
-    return IBRH_OK;
-}
-
-void IBRH_CALL output_release(ibrh_output_lease* lease) {
-    if (lease == nullptr) return;
-    if (lease->gpu_lease != nullptr)
-        dav1_gpu_output_release(lease->gpu_lease);
-    else
-        release_job(lease->job);
-    delete lease;
-}
-
 ibrh_result IBRH_CALL get_last_error(
     const void* object, char* destination, size_t destination_size,
     size_t* required_size) {
@@ -647,12 +606,13 @@ extern "C" IBRH_API ibrh_result IBRH_CALL ibrh_get_api(
     api->runtime_destroy = runtime_destroy;
     api->model_load = model_load;
     api->model_unload = model_unload;
+    api->model_describe_io = model_describe_io;
+    api->model_get_port = model_get_port;
+    api->model_plan_outputs = model_plan_outputs;
     api->submit = submit;
     api->job_poll = job_poll;
     api->job_cancel = job_cancel;
     api->job_release = job_release;
-    api->output_acquire = output_acquire;
-    api->output_release = output_release;
     api->get_last_error = get_last_error;
     return IBRH_OK;
 }

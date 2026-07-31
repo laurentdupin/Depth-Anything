@@ -141,6 +141,26 @@ typedef struct dav1_d3d12_texture_submit_request {
     uint64_t timestamp_ns;
 } dav1_d3d12_texture_submit_request;
 
+/* InferBridge-owned input/output texture binding. All handles are borrowed. */
+typedef struct dav1_d3d12_texture_binding_request {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint64_t input_texture_handle;
+    uint32_t input_width;
+    uint32_t input_height;
+    uint32_t input_pixel_format;
+    int32_t input_size;
+    uint64_t wait_fence_handle;
+    uint64_t wait_fence_value;
+    uint64_t output_texture_handle;
+    uint32_t output_width;
+    uint32_t output_height;
+    uint64_t signal_fence_handle;
+    uint64_t signal_fence_value;
+    uint64_t source_frame_id;
+    uint64_t timestamp_ns;
+} dav1_d3d12_texture_binding_request;
+
 typedef struct dav1_gpu_job_status {
     uint32_t struct_size;
     uint32_t state;
@@ -253,6 +273,11 @@ DAV1_API dav1_status DAV1_CALL dav1_submit_d3d12(
 DAV1_API dav1_status DAV1_CALL dav1_submit_d3d12_texture(
     dav1_context* context,
     const dav1_d3d12_texture_submit_request* request,
+    dav1_gpu_job** job);
+
+DAV1_API dav1_status DAV1_CALL dav1_submit_d3d12_texture_binding(
+    dav1_context* context,
+    const dav1_d3d12_texture_binding_request* request,
     dav1_gpu_job** job);
 
 DAV1_API dav1_status DAV1_CALL dav1_gpu_job_poll(
