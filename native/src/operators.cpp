@@ -293,7 +293,7 @@ void VulkanOperators::linear(
         {&output, &input, &weight, &bias},
         &parameters,
         sizeof(parameters),
-        divide_up(divide_up(output_columns, 4), 8),
+        divide_up(divide_up(output_columns, 4), !half_weight ? 16 : 8),
         divide_up(divide_up(rows, 4), 8));
     if (gelu) {
         struct GeluParameters {
