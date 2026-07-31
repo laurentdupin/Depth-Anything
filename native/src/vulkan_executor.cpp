@@ -545,6 +545,12 @@ public:
         const std::uint64_t tokens =
             std::uint64_t(width / 14) * (height / 14) + 1;
         if (tokens <= 2000) {
+            encoder_.prepare(
+                static_cast<std::uint32_t>(width),
+                static_cast<std::uint32_t>(height));
+            dpt_.prepare(
+                static_cast<std::uint32_t>(width / 14),
+                static_cast<std::uint32_t>(height / 14));
             context_.batch(run_graph);
         } else {
             run_graph();

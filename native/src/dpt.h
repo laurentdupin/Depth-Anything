@@ -25,10 +25,16 @@ public:
         GpuModel& weights,
         VulkanOperators& operators);
 
+    void prepare(
+        std::uint32_t patch_width,
+        std::uint32_t patch_height);
+
     FeatureMap forward(EncoderOutput&& encoded);
 
 private:
-    void select_convolution_block();
+    void select_convolution_block(
+        std::uint32_t patch_width,
+        std::uint32_t patch_height);
     const VulkanBuffer& selected_weight(const std::string& name) const;
 
     FeatureMap conv(

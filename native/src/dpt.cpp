@@ -63,15 +63,17 @@ DptHead::DptHead(
         default:
             throw std::invalid_argument("unsupported DPT encoder");
     }
-    select_convolution_block();
 }
 
-void DptHead::select_convolution_block() {
+void DptHead::select_convolution_block(
+    std::uint32_t patch_width,
+    std::uint32_t patch_height) {
     convolution_block8_ = false;
     convolution_half_weight_ = false;
-    constexpr std::uint32_t side = 16;
+    const std::uint32_t width = std::max(1u, patch_width * 4);
+    const std::uint32_t height = std::max(1u, patch_height * 4);
     const VkDeviceSize bytes =
-        elements(side, side, features_) * sizeof(float);
+        elements(width, height, features_) * sizeof(float);
     VulkanBuffer input = context_.create_device_buffer(bytes);
     VulkanBuffer output = context_.create_device_buffer(bytes);
     const VulkanBuffer& convolution_weight = weight(
@@ -89,8 +91,8 @@ void DptHead::select_convolution_block() {
                     input,
                     convolution_weight,
                     convolution_bias,
-                    side,
-                    side,
+                    width,
+                    height,
                     features_,
                     features_,
                     3,
@@ -170,6 +172,17 @@ FeatureMap DptHead::conv(
         convolution_half_weight_,
         convolution_tiled_);
     return output;
+}
+
+void DptHead::prepare(
+    std::uint32_t patch_width,
+    std::uint32_t patch_height) {
+    if (patch_width == 0 || patch_height == 0) {
+        throw std::invalid_argument("DPT patch dimensions cannot be zero");
+    }
+    if (!convolution_block_selected_) {
+        select_convolution_block(patch_width, patch_height);
+    }
 }
 
 FeatureMap DptHead::residual_unit(
@@ -257,9 +270,7 @@ FeatureMap DptHead::forward(EncoderOutput&& encoded) {
         encoded.embedding != embedding_) {
         throw std::invalid_argument("invalid DPT encoder output");
     }
-    if (!convolution_block_selected_) {
-        select_convolution_block();
-    }
+    prepare(encoded.patch_width, encoded.patch_height);
     FeatureMap layers[4];
     const auto run_projections = [&] {
         for (std::uint32_t index = 0; index < 4; ++index) {

@@ -345,7 +345,9 @@ void VulkanOperators::linear(
             ? divide_up(divide_up(output_columns, 4), 16)
             : divide_up(divide_up(output_columns, 4), 8),
         vectorized
-            ? divide_up(divide_up(rows, 7), 8)
+            ? (vector_tile == 16
+                ? divide_up(rows, 64)
+                : divide_up(divide_up(rows, 7), 8))
             : divide_up(divide_up(rows, 4), 8));
     if (gelu) {
         struct GeluParameters {
