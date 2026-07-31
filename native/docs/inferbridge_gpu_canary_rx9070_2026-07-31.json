@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-07-31",
+  "device": "AMD Radeon RX 9070",
+  "contract": "InferBridge harness API 1.6 D3D12 shared texture/fence",
+  "input": "DXGI_FORMAT_B8G8R8A8_UNORM shared TEXTURE2D",
+  "output": "DXGI_FORMAT_R32_FLOAT shared TEXTURE2D lease",
+  "maximumInFlightJobs": 3,
+  "exactLuidSelection": true,
+  "commonAbiEntryPointsPassed": true,
+  "sourceFrameAndTimestampCorrelation": true,
+  "leaseSurvivesJobModelRuntimeRelease": true,
+  "threeRetainedLeasesAndStableReuse": true,
+  "cancellationAndShutdown": true,
+  "vkQueueWaitIdleCalls": 0,
+  "nativePathTensorUploadByteDelta": 0,
+  "nativePathTensorDownloadByteDelta": 0,
+  "counterScope": "dav1_submit_d3d12_texture, the exact native entry point called by ibrh submit",
+  "cases": [
+    {"id": "depth-anything-v1-small", "model": "depth_anything_vits.dav1", "maximumCpuRelativeDeviation": 0.00000193873, "passed": true},
+    {"id": "depth-anything-v1-base", "model": "depth_anything_vitb.dav1", "maximumCpuRelativeDeviation": 0.000519116, "passed": true},
+    {"id": "depth-anything-v1-large", "model": "depth_anything_vitl.dav1", "maximumCpuRelativeDeviation": 0.00000445563, "passed": true}
+  ]
+}
