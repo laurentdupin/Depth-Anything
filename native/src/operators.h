@@ -33,7 +33,8 @@ public:
         const VulkanBuffer& scale,
         std::uint32_t rows,
         std::uint32_t input_columns,
-        std::uint32_t output_columns);
+        std::uint32_t output_columns,
+        std::uint32_t vector_tile);
 
     void layer_norm(
         VulkanBuffer& output,
@@ -160,6 +161,7 @@ private:
     VulkanPipeline linear_vec4_half_;
     VulkanPipeline linear_vec8_;
     VulkanPipeline linear_vec8_half_;
+    VulkanPipeline linear_vec8_residual_;
     VulkanPipeline linear_vec16_;
     VulkanPipeline linear_vec16_half_;
     VulkanPipeline linear_vec16_residual_;

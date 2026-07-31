@@ -29,6 +29,7 @@
 #include "linear_vec4_half_spv.h"
 #include "linear_vec8_spv.h"
 #include "linear_vec8_half_spv.h"
+#include "linear_vec8_residual_spv.h"
 #include "linear_vec16_spv.h"
 #include "linear_vec16_half_spv.h"
 #include "linear_vec16_residual_spv.h"
@@ -109,6 +110,11 @@ VulkanOperators::VulkanOperators(VulkanContext& context)
           dav1_linear_vec8_half_spv,
           dav1_linear_vec8_half_spv_size,
           4,
+          12)),
+      linear_vec8_residual_(context.create_pipeline(
+          dav1_linear_vec8_residual_spv,
+          dav1_linear_vec8_residual_spv_size,
+          6,
           12)),
       linear_vec16_(context.create_pipeline(
           dav1_linear_vec16_spv,
@@ -260,6 +266,7 @@ VulkanOperators::VulkanOperators(VulkanContext& context)
     linear_vec4_half_.set_debug_name("linear_vec4_half");
     linear_vec8_.set_debug_name("linear_vec8");
     linear_vec8_half_.set_debug_name("linear_vec8_half");
+    linear_vec8_residual_.set_debug_name("linear_vec8_residual");
     linear_vec16_.set_debug_name("linear_vec16");
     linear_vec16_half_.set_debug_name("linear_vec16_half");
     linear_vec16_residual_.set_debug_name("linear_vec16_residual");
@@ -378,7 +385,8 @@ void VulkanOperators::linear_residual_wide(
     const VulkanBuffer& scale,
     std::uint32_t rows,
     std::uint32_t input_columns,
-    std::uint32_t output_columns) {
+    std::uint32_t output_columns,
+    std::uint32_t vector_tile) {
     if (rows == 0 || input_columns == 0 || output_columns == 0) {
         throw std::invalid_argument(
             "linear-residual dimensions cannot be zero");
@@ -404,12 +412,16 @@ void VulkanOperators::linear_residual_wide(
         std::uint32_t output_columns;
     } parameters{rows, input_columns, output_columns};
     context_.dispatch(
-        linear_vec16_residual_,
+        vector_tile == 16
+            ? linear_vec16_residual_
+            : linear_vec8_residual_,
         {&output, &input, &weight, &bias, &residual, &scale},
         &parameters,
         sizeof(parameters),
         divide_up(output_columns, 64),
-        divide_up(rows, 64));
+        vector_tile == 16
+            ? divide_up(rows, 64)
+            : divide_up(divide_up(rows, 7), 8));
 }
 
 void VulkanOperators::layer_norm(

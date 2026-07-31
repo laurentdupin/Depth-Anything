@@ -424,7 +424,9 @@ EncoderOutput DinoEncoder::forward(
                 heads_,
                 &attention_scores,
                 half_attention);
-            if (!linear_half_weight_ && linear_vector_tile_ == 16) {
+            if (!linear_half_weight_ && linear_vectorized_ &&
+                (linear_vector_tile_ == 8 ||
+                 linear_vector_tile_ == 16)) {
                 operators_.linear_residual_wide(
                     next,
                     attention,
@@ -434,7 +436,8 @@ EncoderOutput DinoEncoder::forward(
                     buffer(weights_, block_name(block, ".ls1.gamma")),
                     tokens,
                     embedding_,
-                    embedding_);
+                    embedding_,
+                    linear_vector_tile_);
             } else {
                 operators_.linear(
                     query,
@@ -480,7 +483,9 @@ EncoderOutput DinoEncoder::forward(
                 linear_half_weight_,
                 linear_vectorized_,
                 linear_vector_tile_);
-            if (!linear_half_weight_ && linear_vector_tile_ == 16) {
+            if (!linear_half_weight_ && linear_vectorized_ &&
+                (linear_vector_tile_ == 8 ||
+                 linear_vector_tile_ == 16)) {
                 operators_.linear_residual_wide(
                     next,
                     hidden,
@@ -490,7 +495,8 @@ EncoderOutput DinoEncoder::forward(
                     buffer(weights_, block_name(block, ".ls2.gamma")),
                     tokens,
                     embedding_ * 4,
-                    embedding_);
+                    embedding_,
+                    linear_vector_tile_);
             } else {
                 operators_.linear(
                     query,
