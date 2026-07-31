@@ -216,6 +216,16 @@ void DinoEncoder::select_linear_tile(std::uint32_t rows) {
     }
     Candidate* best =
         best_half_time < best_fp32_time * 0.995 ? best_half : best_fp32;
+    if (best->vectorized && best->vector_tile == 16) {
+        for (Candidate& candidate : candidates) {
+            if (candidate.half_weight == best->half_weight &&
+                candidate.vectorized && candidate.vector_tile == 8 &&
+                best->samples[1] >= candidate.samples[1] * 0.95) {
+                best = &candidate;
+                break;
+            }
+        }
+    }
     linear_block16_ = best->block16;
     linear_vectorized_ = best->vectorized;
     linear_vector_tile_ = best->vector_tile;
