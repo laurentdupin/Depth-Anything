@@ -36,6 +36,7 @@ if(DAV1_WITH_VULKAN)
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/indexing.h"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/conv2d_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/linear_common.glsl"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/linear_vec4_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/project_tokens_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/conv_transpose_nonoverlap_common.glsl"
             VERBATIM
@@ -58,8 +59,12 @@ if(DAV1_WITH_VULKAN)
     dav1_compile_shader(linear16)
     dav1_compile_shader(linear_half)
     dav1_compile_shader(linear16_half)
+    dav1_compile_shader(linear_vec4)
+    dav1_compile_shader(linear_vec4_half)
     dav1_compile_shader(linear_vec8)
     dav1_compile_shader(linear_vec8_half)
+    dav1_compile_shader(linear_vec16)
+    dav1_compile_shader(linear_vec16_half)
     dav1_compile_shader(gelu)
     dav1_compile_shader(layer_norm)
     dav1_compile_shader(add_scaled)

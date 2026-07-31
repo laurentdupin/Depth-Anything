@@ -20,7 +20,9 @@ public:
         std::uint32_t output_columns,
         bool gelu,
         bool block16 = false,
-        bool half_weight = false);
+        bool half_weight = false,
+        bool vectorized = false,
+        std::uint32_t vector_tile = 0);
 
     void layer_norm(
         VulkanBuffer& output,
@@ -143,8 +145,12 @@ private:
     VulkanPipeline linear16_;
     VulkanPipeline linear_half_;
     VulkanPipeline linear16_half_;
+    VulkanPipeline linear_vec4_;
+    VulkanPipeline linear_vec4_half_;
     VulkanPipeline linear_vec8_;
     VulkanPipeline linear_vec8_half_;
+    VulkanPipeline linear_vec16_;
+    VulkanPipeline linear_vec16_half_;
     VulkanPipeline gelu_;
     VulkanPipeline layer_norm_;
     VulkanPipeline add_scaled_;
