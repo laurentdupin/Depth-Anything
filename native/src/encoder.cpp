@@ -71,8 +71,8 @@ DinoEncoder::DinoEncoder(
 
 void DinoEncoder::select_linear_tile() {
     linear_block16_ = false;
-    linear_half_weight_ = false;
-    weights_.retain_transformer_precision(false);
+    linear_half_weight_ = encoder_ != DAV1_ENCODER_VITS;
+    weights_.retain_transformer_precision(linear_half_weight_);
     linear_tile_selected_ = true;
 }
 

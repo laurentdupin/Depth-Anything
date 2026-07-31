@@ -27,8 +27,8 @@ layout(push_constant) uniform Parameters {
     uint has_bias;
 } parameters;
 
-shared float spatial_tile[180];
-shared float kernel_tile[72];
+shared float spatial_tile[1440];
+shared float kernel_tile[576];
 
 void main() {
     const uint output_x = gl_GlobalInvocationID.x;
@@ -43,13 +43,18 @@ void main() {
         gl_LocalInvocationID.y * 16 + gl_LocalInvocationID.x;
     const int origin_x = int(gl_WorkGroupID.x * 16) - 1;
     const int origin_y = int(gl_WorkGroupID.y * 8) - 1;
-    for (uint input_channel = 0;
-         input_channel < parameters.input_channels;
-         ++input_channel) {
-        for (uint index = lane; index < 180; index += 128) {
-            const int input_x = origin_x + int(index % 18);
-            const int input_y = origin_y + int(index / 18);
+    for (uint input_channel_base = 0;
+         input_channel_base < parameters.input_channels;
+         input_channel_base += 8) {
+        for (uint index = lane; index < 1440; index += 128) {
+            const uint input_offset = index / 180;
+            const uint tile_index = index % 180;
+            const uint input_channel =
+                input_channel_base + input_offset;
+            const int input_x = origin_x + int(tile_index % 18);
+            const int input_y = origin_y + int(tile_index / 18);
             spatial_tile[index] =
+                input_channel < parameters.input_channels &&
                 input_x >= 0 && input_x < int(parameters.input_width) &&
                 input_y >= 0 && input_y < int(parameters.input_height)
                 ? input_buffer.data[
@@ -58,30 +63,44 @@ void main() {
                       uint(input_x)]
                 : 0.0;
         }
-        if (lane < 72) {
-            const uint output_offset = lane / 9;
+        for (uint index = lane; index < 576; index += 128) {
+            const uint input_offset = index / 72;
+            const uint kernel_tile_index = index % 72;
+            const uint input_channel =
+                input_channel_base + input_offset;
+            const uint output_offset = kernel_tile_index / 9;
             const uint output_channel =
                 output_channel_base + output_offset;
-            kernel_tile[lane] =
+            kernel_tile[index] =
+                input_channel < parameters.input_channels &&
                 output_channel < parameters.output_channels
                 ? weight_buffer.data[
                       (output_channel * parameters.input_channels +
-                       input_channel) * 9 + lane % 9]
+                       input_channel) * 9 + kernel_tile_index % 9]
                 : 0.0;
         }
         barrier();
         if (valid) {
-            for (uint kernel_y = 0; kernel_y < 3; ++kernel_y) {
-                for (uint kernel_x = 0; kernel_x < 3; ++kernel_x) {
-                    const float value = spatial_tile[
-                        (gl_LocalInvocationID.y + kernel_y) * 18 +
-                        gl_LocalInvocationID.x + kernel_x];
-                    const uint kernel_index = kernel_y * 3 + kernel_x;
-                    for (uint output_offset = 0;
-                         output_offset < 8;
-                         ++output_offset) {
-                        sums[output_offset] += value *
-                            kernel_tile[output_offset * 9 + kernel_index];
+            for (uint input_offset = 0;
+                 input_offset < 8 &&
+                 input_channel_base + input_offset <
+                     parameters.input_channels;
+                 ++input_offset) {
+                for (uint kernel_y = 0; kernel_y < 3; ++kernel_y) {
+                    for (uint kernel_x = 0; kernel_x < 3; ++kernel_x) {
+                        const float value = spatial_tile[
+                            input_offset * 180 +
+                            (gl_LocalInvocationID.y + kernel_y) * 18 +
+                            gl_LocalInvocationID.x + kernel_x];
+                        const uint kernel_index =
+                            kernel_y * 3 + kernel_x;
+                        for (uint output_offset = 0;
+                             output_offset < 8;
+                             ++output_offset) {
+                            sums[output_offset] += value * kernel_tile[
+                                input_offset * 72 +
+                                output_offset * 9 + kernel_index];
+                        }
                     }
                 }
             }

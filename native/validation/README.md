@@ -92,3 +92,17 @@ Build/test gates:
 
 The correctness capability gate passes for ViT-S, ViT-B, and ViT-L. Broader
 multi-size performance measurements remain part of the optimization phase.
+
+## 2026-07-31 performance precision gate
+
+The performance path now keeps ViT-S transformer weights in FP32 and uses
+tiled packed-FP16 transformer weights for ViT-B/ViT-L. Activations,
+attention scores, DPT weights, and accumulation remain FP32. Pointwise DPT
+convolutions use tiled GEMM, while 3x3 DPT convolutions batch eight input
+channels between workgroup barriers.
+
+The deployed InferBridge ViT-L contract was rerun on all 22 Depth Anything V2
+assets against PyTorch CPU at size 140 on the GTX 1080. The worst normalized
+absolute deviation was `0.784314%`; all other images were at or below
+`0.392157%`. The final uint8 payload differed by at most two levels. This
+remains below the requested 1% maximum-deviation ceiling.
