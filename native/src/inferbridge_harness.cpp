@@ -2,6 +2,7 @@
 
 #include "depth_anything_v1.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -523,6 +524,16 @@ ibrh_result IBRH_CALL submit(
             const std::string message = std::string("DAV1 inference failed: ") + dav1_last_error();
             delete job;
             return fail(model->runtime, status_result(status), message);
+        }
+        const auto bounds = std::minmax_element(
+            job->depth.begin(), job->depth.end());
+        const float minimum = *bounds.first;
+        const float span = *bounds.second - minimum;
+        if (span > 0.0f) {
+            for (float& value : job->depth)
+                value = (value - minimum) / span;
+        } else {
+            std::fill(job->depth.begin(), job->depth.end(), 0.0f);
         }
     }
     auto* destination = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(output_resource.native_handle)) + output_resource.byte_offset;
