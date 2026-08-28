@@ -1,4 +1,5 @@
 #include "encoder.h"
+#include "inferbridge/native_harness_precision.h"
 
 #include <algorithm>
 #include <array>
@@ -214,8 +215,8 @@ void DinoEncoder::select_linear_tile(std::uint32_t rows) {
             best_time = median;
         }
     }
-    Candidate* best =
-        best_half_time < best_fp32_time * 0.995 ? best_half : best_fp32;
+    Candidate* best = inferbridge::native::select_fp16_weights(
+        best_half_time < best_fp32_time * 0.995) ? best_half : best_fp32;
     if (best->vectorized && best->vector_tile == 16) {
         for (Candidate& candidate : candidates) {
             if (candidate.half_weight == best->half_weight &&
@@ -368,7 +369,7 @@ EncoderOutput DinoEncoder::forward(
             height,
             embedding_);
     });
-    const bool half_attention = false;
+    const bool half_attention = inferbridge::native::select_fp16_weights(false);
     const VkDeviceSize attention_score_bytes = half_attention
         ? std::uint64_t(heads_) * tokens *
             ((std::uint64_t(tokens) + 1) / 2) *
