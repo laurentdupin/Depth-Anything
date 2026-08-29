@@ -70,7 +70,10 @@ void DptHead::select_convolution_block(
     std::uint32_t patch_width,
     std::uint32_t patch_height) {
     convolution_block8_ = false;
-    convolution_half_weight_ = weights_.select_fp16(false);
+    // Half-weight DPT convolution still accumulates in FP32 and prevents use of
+    // the substantially faster tiled FP32-weight kernel. Keep the DPT head on
+    // FP32 weights while the transformer uses the requested reduced precision.
+    convolution_half_weight_ = false;
     const std::uint32_t width = std::max(1u, patch_width * 4);
     const std::uint32_t height = std::max(1u, patch_height * 4);
     const VkDeviceSize bytes =
