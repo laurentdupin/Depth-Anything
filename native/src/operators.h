@@ -30,6 +30,16 @@ public:
         const VulkanBuffer& weight_scales, const VulkanBuffer& bias,
         std::uint32_t rows, std::uint32_t input_columns,
         std::uint32_t output_columns, bool gelu = false);
+    void linear_half_output_gelu(
+        VulkanBuffer& half_output, const VulkanBuffer& input,
+        const VulkanBuffer& half_weight, const VulkanBuffer& bias,
+        std::uint32_t rows, std::uint32_t input_columns,
+        std::uint32_t output_columns);
+    void linear_half_input(
+        VulkanBuffer& output, const VulkanBuffer& half_input,
+        const VulkanBuffer& half_weight, const VulkanBuffer& bias,
+        std::uint32_t rows, std::uint32_t input_columns,
+        std::uint32_t output_columns);
 
     void linear_residual_wide(
         VulkanBuffer& output,
@@ -178,6 +188,8 @@ private:
     VulkanPipeline linear_vec8_residual_;
     VulkanPipeline linear_vec16_;
     VulkanPipeline linear_vec16_half_;
+    VulkanPipeline linear_vec16_half_input_;
+    VulkanPipeline linear_vec16_half_output_gelu_;
     VulkanPipeline linear_vec16_residual_;
     VulkanPipeline quantize_rows_int8_;
     VulkanPipeline linear_int8_tiled_;

@@ -7,12 +7,33 @@
 #endif
 layout(local_size_x = 16, local_size_y = 8, local_size_z = 1) in;
 
+#if defined(HALF_OUTPUT)
+layout(set = 0, binding = 0, std430) writeonly buffer Output {
+    uint data[];
+} output_buffer;
+#else
 layout(set = 0, binding = 0, std430) writeonly buffer Output {
     float data[];
 } output_buffer;
+#endif
+#if defined(HALF_INPUT)
+layout(set = 0, binding = 1, std430) readonly buffer Input {
+    uint data[];
+} input_buffer;
+vec4 read_input4(uint vector_index) {
+    const uint packed_index = vector_index * 2;
+    return vec4(
+        unpackHalf2x16(input_buffer.data[packed_index]),
+        unpackHalf2x16(input_buffer.data[packed_index + 1]));
+}
+#else
 layout(set = 0, binding = 1, std430) readonly buffer Input {
     vec4 data[];
 } input_buffer;
+vec4 read_input4(uint vector_index) {
+    return input_buffer.data[vector_index];
+}
+#endif
 #if defined(HALF_WEIGHT)
 layout(set = 0, binding = 2, std430) readonly buffer Weight {
     uint data[];
@@ -86,8 +107,8 @@ void main() {
             input_tile[tile_row * K_STRIDE + index % K_VECTORS] =
                 output_row < parameters.rows &&
                     inner_vector < input_vectors
-                ? input_buffer.data[
-                      output_row * input_vectors + inner_vector]
+                ? read_input4(
+                      output_row * input_vectors + inner_vector)
                 : vec4(0.0);
         }
         for (uint index = lane; index < 64 * K_VECTORS; index += 128) {
@@ -136,6 +157,9 @@ void main() {
         if (output_row >= parameters.rows) {
             continue;
         }
+#if defined(HALF_OUTPUT)
+        vec4 values = vec4(0.0);
+#endif
         for (uint column = 0; column < 4; ++column) {
             const uint output_column = column_base + column;
             if (output_column < parameters.output_columns) {
@@ -148,10 +172,34 @@ void main() {
                         output_column] +
                     value * scale_buffer.data[output_column];
 #endif
+#if defined(FUSED_GELU)
+                const float scaled = abs(value) * 0.7071067811865476;
+                const float t = 1.0 / (1.0 + 0.3275911 * scaled);
+                float polynomial = 1.061405429 * t - 1.453152027;
+                polynomial = polynomial * t + 1.421413741;
+                polynomial = polynomial * t - 0.284496736;
+                polynomial = polynomial * t + 0.254829592;
+                polynomial *= t;
+                const float erf_magnitude =
+                    1.0 - polynomial * exp(-scaled * scaled);
+                const float erf_value =
+                    value < 0.0 ? -erf_magnitude : erf_magnitude;
+                value = 0.5 * value * (1.0 + erf_value);
+#endif
+#if defined(HALF_OUTPUT)
+                values[column] = value;
+#else
                 output_buffer.data[
                     output_row * parameters.output_columns + output_column] =
                     value;
+#endif
             }
         }
+#if defined(HALF_OUTPUT)
+        const uint packed_base =
+            (output_row * parameters.output_columns + column_base) / 2;
+        output_buffer.data[packed_base] = packHalf2x16(values.xy);
+        output_buffer.data[packed_base + 1] = packHalf2x16(values.zw);
+#endif
     }
 }

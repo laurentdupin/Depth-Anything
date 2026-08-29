@@ -376,6 +376,8 @@ EncoderOutput DinoEncoder::forward(
     const std::uint64_t token_elements =
         std::uint64_t(tokens) * embedding_;
     const VkDeviceSize token_bytes = token_elements * sizeof(float);
+    const bool packed_half_mlp = linear_half_weight_ &&
+        linear_vectorized_ && linear_vector_tile_ == 16;
 
     VulkanBuffer current = context_.create_device_buffer(token_bytes);
     VulkanBuffer next = context_.create_device_buffer(token_bytes);
@@ -384,8 +386,8 @@ EncoderOutput DinoEncoder::forward(
     VulkanBuffer attention = context_.create_device_buffer(token_bytes);
     VulkanBuffer qkv =
         context_.create_device_buffer(token_bytes * 3);
-    VulkanBuffer hidden =
-        context_.create_device_buffer(token_bytes * 4);
+    VulkanBuffer hidden = context_.create_device_buffer(
+        packed_half_mlp ? token_bytes * 2 : token_bytes * 4);
     context_.batch([&] {
         operators_.prepare_tokens(
             current,
@@ -485,11 +487,19 @@ EncoderOutput DinoEncoder::forward(
                 tokens,
                 embedding_,
                 1.0e-6f);
-            linear(
-                hidden, normalized,
-                block_name(block, ".mlp.fc1.weight"),
-                block_name(block, ".mlp.fc1.bias"),
-                tokens, embedding_, embedding_ * 4, true);
+            if (packed_half_mlp) {
+                operators_.linear_half_output_gelu(
+                    hidden, normalized,
+                    linear_weight(block_name(block, ".mlp.fc1.weight")),
+                    buffer(weights_, block_name(block, ".mlp.fc1.bias")),
+                    tokens, embedding_, embedding_ * 4);
+            } else {
+                linear(
+                    hidden, normalized,
+                    block_name(block, ".mlp.fc1.weight"),
+                    block_name(block, ".mlp.fc1.bias"),
+                    tokens, embedding_, embedding_ * 4, true);
+            }
             if (!linear_half_weight_ && linear_vectorized_ &&
                 (linear_vector_tile_ == 8 ||
                  linear_vector_tile_ == 16)) {
@@ -505,11 +515,19 @@ EncoderOutput DinoEncoder::forward(
                     embedding_,
                     linear_vector_tile_);
             } else {
-                linear(
-                    query, hidden,
-                    block_name(block, ".mlp.fc2.weight"),
-                    block_name(block, ".mlp.fc2.bias"),
-                    tokens, embedding_ * 4, embedding_);
+                if (packed_half_mlp) {
+                    operators_.linear_half_input(
+                        query, hidden,
+                        linear_weight(block_name(block, ".mlp.fc2.weight")),
+                        buffer(weights_, block_name(block, ".mlp.fc2.bias")),
+                        tokens, embedding_ * 4, embedding_);
+                } else {
+                    linear(
+                        query, hidden,
+                        block_name(block, ".mlp.fc2.weight"),
+                        block_name(block, ".mlp.fc2.bias"),
+                        tokens, embedding_ * 4, embedding_);
+                }
                 operators_.add_scaled(
                     next,
                     current,

@@ -35,6 +35,8 @@
 #include "linear_vec8_residual_spv.h"
 #include "linear_vec16_spv.h"
 #include "linear_vec16_half_spv.h"
+#include "linear_vec16_half_input_spv.h"
+#include "linear_vec16_half_output_gelu_spv.h"
 #include "linear_vec16_residual_spv.h"
 #include "linear_int8_tiled_spv.h"
 #include "quantize_rows_int8_spv.h"
@@ -136,6 +138,12 @@ VulkanOperators::VulkanOperators(VulkanContext& context)
           dav1_linear_vec16_residual_spv_size,
           6,
           12)),
+      linear_vec16_half_input_(context.create_pipeline(
+          dav1_linear_vec16_half_input_spv,
+          dav1_linear_vec16_half_input_spv_size, 4, 12)),
+      linear_vec16_half_output_gelu_(context.create_pipeline(
+          dav1_linear_vec16_half_output_gelu_spv,
+          dav1_linear_vec16_half_output_gelu_spv_size, 4, 12)),
       quantize_rows_int8_(context.supports_packed_int8_dot() &&
               inferbridge::native::requested_precision() ==
                   inferbridge::native::Precision::int8
@@ -296,6 +304,9 @@ VulkanOperators::VulkanOperators(VulkanContext& context)
     linear_vec8_residual_.set_debug_name("linear_vec8_residual");
     linear_vec16_.set_debug_name("linear_vec16");
     linear_vec16_half_.set_debug_name("linear_vec16_half");
+    linear_vec16_half_input_.set_debug_name("linear_vec16_half_input");
+    linear_vec16_half_output_gelu_.set_debug_name(
+        "linear_vec16_half_output_gelu");
     linear_vec16_residual_.set_debug_name("linear_vec16_residual");
     if (context.supports_packed_int8_dot()) {
         quantize_rows_int8_.set_debug_name("quantize_rows_int8");
@@ -440,6 +451,60 @@ void VulkanOperators::linear(
             sizeof(gelu_parameters),
             divide_up(gelu_parameters.count, 256));
     }
+}
+
+void VulkanOperators::linear_half_output_gelu(
+    VulkanBuffer& half_output,
+    const VulkanBuffer& input,
+    const VulkanBuffer& half_weight,
+    const VulkanBuffer& bias,
+    std::uint32_t rows,
+    std::uint32_t input_columns,
+    std::uint32_t output_columns) {
+    if (rows == 0 || input_columns == 0 || output_columns == 0 ||
+        input_columns % 4 != 0 || output_columns % 4 != 0) {
+        throw std::invalid_argument("invalid packed-half output linear dimensions");
+    }
+    require_bytes(input, std::uint64_t(rows) * input_columns, "input");
+    require_half_elements(
+        half_weight, std::uint64_t(output_columns) * input_columns, "weight");
+    require_bytes(bias, output_columns, "bias");
+    require_half_elements(
+        half_output, std::uint64_t(rows) * output_columns, "output");
+    const std::uint32_t parameters[3] = {
+        rows, input_columns, output_columns};
+    context_.dispatch(
+        linear_vec16_half_output_gelu_,
+        {&half_output, &input, &half_weight, &bias},
+        parameters, sizeof(parameters),
+        divide_up(output_columns, 64), divide_up(rows, 64));
+}
+
+void VulkanOperators::linear_half_input(
+    VulkanBuffer& output,
+    const VulkanBuffer& half_input,
+    const VulkanBuffer& half_weight,
+    const VulkanBuffer& bias,
+    std::uint32_t rows,
+    std::uint32_t input_columns,
+    std::uint32_t output_columns) {
+    if (rows == 0 || input_columns == 0 || output_columns == 0 ||
+        input_columns % 4 != 0) {
+        throw std::invalid_argument("invalid packed-half input linear dimensions");
+    }
+    require_half_elements(
+        half_input, std::uint64_t(rows) * input_columns, "input");
+    require_half_elements(
+        half_weight, std::uint64_t(output_columns) * input_columns, "weight");
+    require_bytes(bias, output_columns, "bias");
+    require_bytes(output, std::uint64_t(rows) * output_columns, "output");
+    const std::uint32_t parameters[3] = {
+        rows, input_columns, output_columns};
+    context_.dispatch(
+        linear_vec16_half_input_,
+        {&output, &half_input, &half_weight, &bias},
+        parameters, sizeof(parameters),
+        divide_up(output_columns, 64), divide_up(rows, 64));
 }
 
 void VulkanOperators::linear_residual_wide(
