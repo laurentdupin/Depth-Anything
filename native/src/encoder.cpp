@@ -377,7 +377,8 @@ EncoderOutput DinoEncoder::forward(
         std::uint64_t(tokens) * embedding_;
     const VkDeviceSize token_bytes = token_elements * sizeof(float);
     const bool packed_half_mlp = linear_half_weight_ &&
-        linear_vectorized_ && linear_vector_tile_ == 16;
+        linear_vectorized_ &&
+        (linear_vector_tile_ == 4 || linear_vector_tile_ == 16);
 
     VulkanBuffer current = context_.create_device_buffer(token_bytes);
     VulkanBuffer next = context_.create_device_buffer(token_bytes);
@@ -492,7 +493,8 @@ EncoderOutput DinoEncoder::forward(
                     hidden, normalized,
                     linear_weight(block_name(block, ".mlp.fc1.weight")),
                     buffer(weights_, block_name(block, ".mlp.fc1.bias")),
-                    tokens, embedding_, embedding_ * 4);
+                    tokens, embedding_, embedding_ * 4,
+                    linear_vector_tile_);
             } else {
                 linear(
                     hidden, normalized,
@@ -520,7 +522,8 @@ EncoderOutput DinoEncoder::forward(
                         query, hidden,
                         linear_weight(block_name(block, ".mlp.fc2.weight")),
                         buffer(weights_, block_name(block, ".mlp.fc2.bias")),
-                        tokens, embedding_ * 4, embedding_);
+                        tokens, embedding_ * 4, embedding_,
+                        linear_vector_tile_);
                 } else {
                     linear(
                         query, hidden,

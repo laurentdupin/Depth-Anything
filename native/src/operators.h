@@ -34,12 +34,12 @@ public:
         VulkanBuffer& half_output, const VulkanBuffer& input,
         const VulkanBuffer& half_weight, const VulkanBuffer& bias,
         std::uint32_t rows, std::uint32_t input_columns,
-        std::uint32_t output_columns);
+        std::uint32_t output_columns, std::uint32_t vector_tile);
     void linear_half_input(
         VulkanBuffer& output, const VulkanBuffer& half_input,
         const VulkanBuffer& half_weight, const VulkanBuffer& bias,
         std::uint32_t rows, std::uint32_t input_columns,
-        std::uint32_t output_columns);
+        std::uint32_t output_columns, std::uint32_t vector_tile);
 
     void linear_residual_wide(
         VulkanBuffer& output,
@@ -183,6 +183,8 @@ private:
     VulkanPipeline linear16_half_;
     VulkanPipeline linear_vec4_;
     VulkanPipeline linear_vec4_half_;
+    VulkanPipeline linear_vec4_half_input_;
+    VulkanPipeline linear_vec4_half_output_gelu_;
     VulkanPipeline linear_vec8_;
     VulkanPipeline linear_vec8_half_;
     VulkanPipeline linear_vec8_residual_;
