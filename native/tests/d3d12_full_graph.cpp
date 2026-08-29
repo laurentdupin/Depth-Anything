@@ -1397,6 +1397,11 @@ int main() try {
         << "three retained texture leases, exhaustion, and stable "
            "slot reuse passed\n";
 
+// The generic InferBridge host now owns output planning and binds caller-owned
+// output resources before submit. This executable validates the DAV1 native
+// D3D12 graph directly; the current generic host contract is covered by the
+// InferBridge integration tests instead of duplicating the retired lease ABI.
+#if 0
     ibrh_api harness{};
     check(
         ibrh_get_api(
@@ -1543,6 +1548,7 @@ int main() try {
     harness.output_release(harness_lease);
     std::cout
         << "InferBridge shared texture/fence graph and shutdown lease passed\n";
+#endif
 
     // Hold the imported wait unsignaled so cancellation is deterministic.
     const std::vector<std::uint8_t> pixels =

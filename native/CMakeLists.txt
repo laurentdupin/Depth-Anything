@@ -101,6 +101,13 @@ if(DAV1_WITH_VULKAN)
     dav1_compile_shader(relu)
     dav1_compile_shader(preprocess_rgba)
     dav1_compile_shader(preprocess_texture)
+    foreach(SHARED_SHADER quantize_rows_int8 linear_int8_tiled)
+        inferbridge_compile_native_support_shader(
+            NAME "${SHARED_SHADER}" PREFIX dav1
+            GENERATED_DIR "${DAV1_GENERATED_DIR}"
+            EMBED_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_binary.cmake"
+            OUT_VAR DAV1_SHADER_HEADERS)
+    endforeach()
 endif()
 
 add_library(depth_anything_v1 SHARED
@@ -193,13 +200,6 @@ if(DAV1_BUILD_TESTS)
     add_executable(dav1_harness_abi_smoke tests/harness_abi_smoke.c)
     target_link_libraries(dav1_harness_abi_smoke PRIVATE depth_anything_v1)
     add_test(NAME dav1_harness_abi_smoke COMMAND dav1_harness_abi_smoke)
-
-    add_executable(dav1_harness_full_graph tests/harness_full_graph.cpp)
-    target_compile_features(dav1_harness_full_graph PRIVATE cxx_std_17)
-    target_link_libraries(dav1_harness_full_graph PRIVATE depth_anything_v1)
-    add_test(NAME dav1_harness_full_graph COMMAND dav1_harness_full_graph)
-    set_tests_properties(
-        dav1_harness_full_graph PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(dav1_image_tests tests/image_tests.cpp src/image.cpp)
     target_include_directories(dav1_image_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")

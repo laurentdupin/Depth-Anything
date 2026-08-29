@@ -7,6 +7,7 @@
 #include "model.h"
 #include "operators.h"
 #include "vulkan.h"
+#include "inferbridge/native_harness_resource_cache.h"
 #include "inferbridge/native_harness_resource_lifetime.h"
 
 #include <array>
@@ -418,6 +419,8 @@ public:
         VulkanBuffer output_buffer,
         VulkanImage input_image,
         VulkanImage output_image,
+        std::shared_ptr<VulkanImage> cached_input_image,
+        std::shared_ptr<VulkanImage> cached_output_image,
         VulkanSubmission submission,
         std::uint32_t width,
         std::uint32_t height,
@@ -429,6 +432,8 @@ public:
           output_buffer_(std::move(output_buffer)),
           input_image_(std::move(input_image)),
           output_image_(std::move(output_image)),
+          cached_input_image_(std::move(cached_input_image)),
+          cached_output_image_(std::move(cached_output_image)),
           submission_(std::move(submission)),
           width_(width),
           height_(height),
@@ -441,6 +446,8 @@ public:
             lifetime_, submission_, [this] {
                 output_image_ = VulkanImage{};
                 input_image_ = VulkanImage{};
+                cached_output_image_.reset();
+                cached_input_image_.reset();
                 output_buffer_ = VulkanBuffer{};
             });
         if (slot_) {
@@ -495,6 +502,8 @@ private:
     VulkanBuffer output_buffer_;
     VulkanImage input_image_;
     VulkanImage output_image_;
+    std::shared_ptr<VulkanImage> cached_input_image_;
+    std::shared_ptr<VulkanImage> cached_output_image_;
     VulkanSubmission submission_;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
@@ -716,6 +725,8 @@ public:
                 std::move(output),
                 VulkanImage{},
                 VulkanImage{},
+                std::shared_ptr<VulkanImage>{},
+                std::shared_ptr<VulkanImage>{},
                 std::move(submission),
                 request.width,
                 request.height,
@@ -760,12 +771,6 @@ public:
             throw std::invalid_argument(
                 "invalid D3D12 GPU texture inference request");
         }
-        validate_shared_texture(
-            d3d12_device_.Get(),
-            request.shared_texture_handle,
-            request.width,
-            request.height,
-            request.pixel_format);
         const bool external_output = request.output_texture_handle != 0;
         if (external_output) {
             if (request.output_width != request.width ||
@@ -775,9 +780,6 @@ public:
                 throw std::invalid_argument(
                     "invalid InferBridge-owned D3D12 output binding");
             }
-            validate_shared_depth_texture(
-                d3d12_device_.Get(), request.output_texture_handle,
-                request.output_width, request.output_height);
         }
         std::shared_ptr<GpuSlot> slot;
         if (!external_output) {
@@ -788,29 +790,58 @@ public:
                 static_cast<int>(request.width),
                 static_cast<int>(request.height),
                 request.input_size);
-            VulkanImage output = external_output
-                ? context_.import_d3d12_image(
-                    reinterpret_cast<void*>(request.output_texture_handle),
+            std::shared_ptr<VulkanImage> cached_output;
+            VulkanImage transient_output;
+            if (external_output) {
+                const auto usage = VK_IMAGE_USAGE_STORAGE_BIT |
+                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                cached_output = output_image_cache_.get_or_create({
+                    inferbridge::native_harness::stable_resource_identity(
+                        request.output_texture_handle,
+                        request.output_texture_identity),
                     request.output_width, request.output_height,
-                    VK_FORMAT_R32_SFLOAT,
-                    VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
-                : prepare_texture_output(
+                    VK_FORMAT_R32_SFLOAT, usage}, [&] {
+                        validate_shared_depth_texture(
+                            d3d12_device_.Get(), request.output_texture_handle,
+                            request.output_width, request.output_height);
+                        return std::make_shared<VulkanImage>(
+                            context_.import_d3d12_image(
+                                reinterpret_cast<void*>(
+                                    request.output_texture_handle),
+                                request.output_width, request.output_height,
+                                VK_FORMAT_R32_SFLOAT, usage));
+                    });
+            } else {
+                transient_output = prepare_texture_output(
                     *slot, d3d12_device_.Get(), context_,
                     request.width, request.height);
+            }
+            VulkanImage& output = external_output
+                ? *cached_output : transient_output;
             const std::uint64_t signal_value = external_output
                 ? request.signal_fence_value : ++slot->fence_value;
             const VkFormat input_format =
                 request.pixel_format == DAV1_GPU_PIXEL_BGRA8
                 ? VK_FORMAT_B8G8R8A8_UNORM
                 : VK_FORMAT_R8G8B8A8_UNORM;
-            VulkanImage input = context_.import_d3d12_image(
-                reinterpret_cast<void*>(
-                    request.shared_texture_handle),
-                request.width,
-                request.height,
-                input_format,
-                VK_IMAGE_USAGE_SAMPLED_BIT |
-                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+            const auto input_usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            auto cached_input = input_image_cache_.get_or_create({
+                inferbridge::native_harness::stable_resource_identity(
+                    request.shared_texture_handle,
+                    request.shared_texture_identity),
+                request.width, request.height, input_format, input_usage}, [&] {
+                    validate_shared_texture(
+                        d3d12_device_.Get(), request.shared_texture_handle,
+                        request.width, request.height, request.pixel_format);
+                    return std::make_shared<VulkanImage>(
+                        context_.import_d3d12_image(
+                            reinterpret_cast<void*>(
+                                request.shared_texture_handle),
+                            request.width, request.height, input_format,
+                            input_usage));
+                });
+            VulkanImage& input = *cached_input;
             VulkanSemaphore wait = context_.import_d3d12_fence(
                 reinterpret_cast<void*>(
                     request.wait_fence_handle),
@@ -883,8 +914,10 @@ public:
                 slot,
                 lifetime_,
                 VulkanBuffer{},
-                std::move(input),
-                std::move(output),
+                VulkanImage{},
+                std::move(transient_output),
+                std::move(cached_input),
+                std::move(cached_output),
                 std::move(submission),
                 request.width,
                 request.height,
@@ -918,6 +951,10 @@ private:
     ComPtr<ID3D12Device> d3d12_device_;
     std::array<
         std::shared_ptr<GpuSlot>, kGpuSlotCount> gpu_slots_;
+    inferbridge::native_harness::StableResourceCache<
+        std::shared_ptr<VulkanImage>> input_image_cache_;
+    inferbridge::native_harness::StableResourceCache<
+        std::shared_ptr<VulkanImage>> output_image_cache_;
     inferbridge::native_harness::ResourceLifetimeDomainPtr lifetime_ =
         inferbridge::native_harness::make_resource_lifetime_domain();
     std::atomic<std::uint32_t> next_gpu_slot_{0};
