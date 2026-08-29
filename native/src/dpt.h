@@ -67,6 +67,7 @@ private:
     bool convolution_block8_ = false;
     bool convolution_half_weight_ = false;
     std::uint32_t convolution_tiled_variant_ = 0;
+    bool convolution_stride2_tiled_ = false;
 };
 
 }  // namespace dav1

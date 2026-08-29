@@ -20,6 +20,7 @@
 #include "conv2d8_half_spv.h"
 #include "conv2d_tiled_spv.h"
 #include "conv2d_tiled16x8_spv.h"
+#include "conv2d_tiled_stride2_spv.h"
 #include "conv_transpose_nonoverlap_spv.h"
 #include "conv_transpose_nonoverlap_half_spv.h"
 #include "gelu_spv.h"
@@ -255,6 +256,11 @@ VulkanOperators::VulkanOperators(VulkanContext& context)
           dav1_conv2d_tiled16x8_spv_size,
           4,
           40)),
+      conv2d_tiled_stride2_(context.create_pipeline(
+          dav1_conv2d_tiled_stride2_spv,
+          dav1_conv2d_tiled_stride2_spv_size,
+          4,
+          40)),
       conv_transpose_nonoverlap_(context.create_pipeline(
           dav1_conv_transpose_nonoverlap_spv,
           dav1_conv_transpose_nonoverlap_spv_size,
@@ -346,6 +352,7 @@ VulkanOperators::VulkanOperators(VulkanContext& context)
     conv2d8_half_.set_debug_name("conv2d8_half");
     conv2d_tiled_.set_debug_name("conv2d_tiled");
     conv2d_tiled16x8_.set_debug_name("conv2d_tiled16x8");
+    conv2d_tiled_stride2_.set_debug_name("conv2d_tiled_stride2");
     conv_transpose_nonoverlap_.set_debug_name(
         "conv_transpose_nonoverlap");
     conv_transpose_nonoverlap_half_.set_debug_name(
@@ -942,7 +949,8 @@ void VulkanOperators::conv2d(
     bool has_bias,
     bool block8,
     bool half_weight,
-    std::uint32_t tiled_variant) {
+    std::uint32_t tiled_variant,
+    bool stride2_tiled) {
     if (input_width == 0 || input_height == 0 || input_channels == 0 ||
         output_channels == 0 || kernel == 0 || stride == 0 ||
         input_width + 2 * padding < kernel ||
@@ -992,25 +1000,32 @@ void VulkanOperators::conv2d(
         stride == 1 && padding == 1 &&
         output_width == input_width && output_height == input_height;
     const bool use_wide_tiled = use_tiled && tiled_variant == 2;
+    const bool use_stride2_tiled =
+        stride2_tiled && !half_weight && !block8 && kernel == 3 &&
+        stride == 2 && padding == 1;
     const bool pointwise =
         !half_weight && kernel == 1 && stride == 1 && padding == 0 &&
         output_width == input_width && output_height == input_height;
     context_.dispatch(
-        pointwise
+        use_stride2_tiled
+            ? conv2d_tiled_stride2_
+            : (pointwise
             ? conv2d_pointwise_gemm_
             : (use_tiled
             ? (use_wide_tiled ? conv2d_tiled16x8_ : conv2d_tiled_)
             : (half_weight
             ? (block8 ? conv2d8_half_ : conv2d_half_)
-            : (block8 ? conv2d8_ : conv2d_))),
+            : (block8 ? conv2d8_ : conv2d_)))),
         {&output, &input, &weight, &bias},
         &parameters,
         sizeof(parameters),
-        pointwise ? divide_up(output_width * output_height, 32)
+        pointwise && !use_stride2_tiled
+            ? divide_up(output_width * output_height, 32)
             : divide_up(output_width, use_wide_tiled ? 16 : 8),
-        pointwise ? divide_up(output_channels, 32)
+        pointwise && !use_stride2_tiled
+            ? divide_up(output_channels, 32)
             : divide_up(output_height, 8),
-        pointwise ? 1
+        pointwise && !use_stride2_tiled ? 1
             : divide_up(output_channels,
                 (block8 || use_wide_tiled) ? 8 : 4));
 }

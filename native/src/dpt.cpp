@@ -125,14 +125,59 @@ void DptHead::select_convolution_block(
     std::sort(tiled_small.begin(), tiled_small.end());
     std::sort(tiled_wide.begin(), tiled_wide.end());
     convolution_tiled_variant_ = 0;
-    const std::uint32_t fastest_tiled =
-        tiled_small[1] <= tiled_wide[1] ? 1u : 2u;
-    const double fastest_tiled_time = fastest_tiled == 1u
-        ? tiled_small[1]
-        : tiled_wide[1];
+    std::uint32_t fastest_tiled = 1;
+    double fastest_tiled_time = tiled_small[1];
+    if (tiled_wide[1] < fastest_tiled_time) {
+        fastest_tiled = 2;
+        fastest_tiled_time = tiled_wide[1];
+    }
     if (fastest_tiled_time < direct[1] * 0.95) {
         convolution_tiled_variant_ = fastest_tiled;
     }
+
+    const std::uint32_t stride_output_width =
+        (patch_width + 2 - 3) / 2 + 1;
+    const std::uint32_t stride_output_height =
+        (patch_height + 2 - 3) / 2 + 1;
+    VulkanBuffer stride_input = context_.create_device_buffer(
+        elements(
+            patch_width, patch_height, project_channels_[3]) *
+        sizeof(float));
+    VulkanBuffer stride_output = context_.create_device_buffer(
+        elements(
+            stride_output_width, stride_output_height,
+            project_channels_[3]) * sizeof(float));
+    const VulkanBuffer& stride_weight = selected_weight(
+        "depth_head.resize_layers.3.weight");
+    const VulkanBuffer& stride_bias = weight(
+        weights_, "depth_head.resize_layers.3.bias");
+    const auto run_stride2 = [&](bool tiled) {
+        const auto start = std::chrono::steady_clock::now();
+        context_.batch([&] {
+            for (int repetition = 0; repetition < 4; ++repetition) {
+                operators_.conv2d(
+                    stride_output, stride_input,
+                    stride_weight, stride_bias,
+                    patch_width, patch_height, project_channels_[3],
+                    project_channels_[3], 3, 2, 1, true,
+                    false, false, 0, tiled);
+            }
+        });
+        return std::chrono::duration<double, std::micro>(
+            std::chrono::steady_clock::now() - start).count();
+    };
+    run_stride2(false);
+    run_stride2(true);
+    std::array<double, 3> stride_direct{};
+    std::array<double, 3> stride_tiled{};
+    for (std::size_t sample = 0; sample < stride_direct.size(); ++sample) {
+        stride_direct[sample] = run_stride2(false);
+        stride_tiled[sample] = run_stride2(true);
+    }
+    std::sort(stride_direct.begin(), stride_direct.end());
+    std::sort(stride_tiled.begin(), stride_tiled.end());
+    convolution_stride2_tiled_ =
+        stride_tiled[1] < stride_direct[1] * 0.95;
     weights_.retain_dpt_precision(convolution_half_weight_);
     convolution_block_selected_ = true;
 }
@@ -185,7 +230,8 @@ FeatureMap DptHead::conv(
         has_bias,
         convolution_block8_,
         convolution_half_weight_,
-        convolution_tiled_variant_);
+        convolution_tiled_variant_,
+        convolution_stride2_tiled_);
     return output;
 }
 
