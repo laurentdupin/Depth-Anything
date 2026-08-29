@@ -85,7 +85,7 @@ void DptHead::select_convolution_block(
     const VulkanBuffer& convolution_bias = weight(
         weights_,
         "depth_head.scratch.refinenet1.resConfUnit2.conv1.bias");
-    const auto run = [&](bool tiled) {
+    const auto run = [&](std::uint32_t tiled_variant) {
         const auto start = std::chrono::steady_clock::now();
         context_.batch([&] {
             for (int repetition = 0; repetition < 8; ++repetition) {
@@ -104,23 +104,35 @@ void DptHead::select_convolution_block(
                     true,
                     false,
                     convolution_half_weight_,
-                    tiled);
+                    tiled_variant);
             }
         });
         return std::chrono::duration<double, std::micro>(
             std::chrono::steady_clock::now() - start).count();
     };
-    run(false);
-    run(true);
+    run(0);
+    run(1);
+    run(2);
     std::array<double, 3> direct{};
-    std::array<double, 3> tiled{};
+    std::array<double, 3> tiled_small{};
+    std::array<double, 3> tiled_wide{};
     for (std::size_t sample = 0; sample < direct.size(); ++sample) {
-        direct[sample] = run(false);
-        tiled[sample] = run(true);
+        direct[sample] = run(0);
+        tiled_small[sample] = run(1);
+        tiled_wide[sample] = run(2);
     }
     std::sort(direct.begin(), direct.end());
-    std::sort(tiled.begin(), tiled.end());
-    convolution_tiled_ = tiled[1] < direct[1] * 0.95;
+    std::sort(tiled_small.begin(), tiled_small.end());
+    std::sort(tiled_wide.begin(), tiled_wide.end());
+    convolution_tiled_variant_ = 0;
+    const std::uint32_t fastest_tiled =
+        tiled_small[1] <= tiled_wide[1] ? 1u : 2u;
+    const double fastest_tiled_time = fastest_tiled == 1u
+        ? tiled_small[1]
+        : tiled_wide[1];
+    if (fastest_tiled_time < direct[1] * 0.95) {
+        convolution_tiled_variant_ = fastest_tiled;
+    }
     weights_.retain_dpt_precision(convolution_half_weight_);
     convolution_block_selected_ = true;
 }
@@ -173,7 +185,7 @@ FeatureMap DptHead::conv(
         has_bias,
         convolution_block8_,
         convolution_half_weight_,
-        convolution_tiled_);
+        convolution_tiled_variant_);
     return output;
 }
 

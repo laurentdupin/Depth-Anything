@@ -587,6 +587,9 @@ public:
             dpt_.prepare(
                 static_cast<std::uint32_t>(width / 14),
                 static_cast<std::uint32_t>(height / 14));
+            // Autotuning runs in prepare(). Exclude it from the per-inference
+            // GPU profile so optimization decisions use steady-state costs.
+            context_.clear_profile();
             context_.batch(run_graph);
         } else {
             run_graph();

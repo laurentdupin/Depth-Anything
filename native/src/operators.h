@@ -115,7 +115,7 @@ public:
         bool has_bias,
         bool block8 = false,
         bool half_weight = false,
-        bool tiled = false);
+        std::uint32_t tiled_variant = 0);
 
     void conv_transpose_nonoverlap(
         VulkanBuffer& output,

@@ -942,7 +942,7 @@ void VulkanOperators::conv2d(
     bool has_bias,
     bool block8,
     bool half_weight,
-    bool tiled) {
+    std::uint32_t tiled_variant) {
     if (input_width == 0 || input_height == 0 || input_channels == 0 ||
         output_channels == 0 || kernel == 0 || stride == 0 ||
         input_width + 2 * padding < kernel ||
@@ -988,9 +988,10 @@ void VulkanOperators::conv2d(
         has_bias ? 1u : 0u,
     };
     const bool use_tiled =
-        tiled && !half_weight && !block8 && kernel == 3 &&
+        tiled_variant != 0 && !half_weight && !block8 && kernel == 3 &&
         stride == 1 && padding == 1 &&
         output_width == input_width && output_height == input_height;
+    const bool use_wide_tiled = use_tiled && tiled_variant == 2;
     const bool pointwise =
         !half_weight && kernel == 1 && stride == 1 && padding == 0 &&
         output_width == input_width && output_height == input_height;
@@ -998,7 +999,7 @@ void VulkanOperators::conv2d(
         pointwise
             ? conv2d_pointwise_gemm_
             : (use_tiled
-            ? conv2d_tiled16x8_
+            ? (use_wide_tiled ? conv2d_tiled16x8_ : conv2d_tiled_)
             : (half_weight
             ? (block8 ? conv2d8_half_ : conv2d_half_)
             : (block8 ? conv2d8_ : conv2d_))),
@@ -1006,11 +1007,12 @@ void VulkanOperators::conv2d(
         &parameters,
         sizeof(parameters),
         pointwise ? divide_up(output_width * output_height, 32)
-            : divide_up(output_width, use_tiled ? 16 : 8),
+            : divide_up(output_width, use_wide_tiled ? 16 : 8),
         pointwise ? divide_up(output_channels, 32)
             : divide_up(output_height, 8),
         pointwise ? 1
-            : divide_up(output_channels, (block8 || use_tiled) ? 8 : 4));
+            : divide_up(output_channels,
+                (block8 || use_wide_tiled) ? 8 : 4));
 }
 
 void VulkanOperators::conv_transpose_nonoverlap(

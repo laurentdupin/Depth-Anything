@@ -584,6 +584,10 @@ void VulkanContext::record_profile(
     ++stat.dispatches;
 }
 
+void VulkanContext::clear_profile() {
+    if (profile_dispatches_) profile_stats_.clear();
+}
+
 void VulkanContext::print_profile() const noexcept {
     if (!profile_dispatches_ || profile_stats_.empty()) return;
     std::vector<std::pair<std::string, ProfileStat>> sorted(

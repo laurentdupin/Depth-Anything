@@ -270,6 +270,7 @@ public:
         std::uint32_t group_x,
         std::uint32_t group_y = 1,
         std::uint32_t group_z = 1);
+    void clear_profile();
 
     template <typename Function>
     void batch(Function&& function) {
