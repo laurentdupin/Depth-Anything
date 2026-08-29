@@ -247,7 +247,8 @@ void DinoEncoder::linear(
     std::uint32_t rows, std::uint32_t input_columns,
     std::uint32_t output_columns, bool gelu) {
     const GpuTensor& tensor = weights_.tensor(weight_name);
-    if (weights_.uses_int8_weights()) {
+    if (weights_.uses_int8_weights() &&
+        weight_name.find(".mlp.") != std::string::npos) {
         operators_.linear_int8(
             output, input, tensor.int8_buffer, tensor.int8_scales,
             buffer(weights_, bias_name), rows, input_columns,
@@ -272,11 +273,11 @@ void DinoEncoder::prepare(
     if (!linear_tile_selected_) {
         if (weights_.uses_int8_weights()) {
             linear_tile_selected_ = true;
-            linear_block16_ = false;
-            linear_vectorized_ = false;
-            linear_vector_tile_ = 0;
-            linear_half_weight_ = false;
-            weights_.retain_transformer_precision(false);
+            linear_block16_ = true;
+            linear_vectorized_ = true;
+            linear_vector_tile_ = 4;
+            linear_half_weight_ = true;
+            weights_.retain_transformer_precision(true);
         } else {
             select_linear_tile((width / 14) * (height / 14) + 1);
         }
@@ -376,7 +377,8 @@ EncoderOutput DinoEncoder::forward(
     const std::uint64_t token_elements =
         std::uint64_t(tokens) * embedding_;
     const VkDeviceSize token_bytes = token_elements * sizeof(float);
-    const bool packed_half_mlp = linear_half_weight_ &&
+    const bool packed_half_mlp = !weights_.uses_int8_weights() &&
+        linear_half_weight_ &&
         linear_vectorized_ &&
         (linear_vector_tile_ == 4 || linear_vector_tile_ == 16);
 
@@ -402,7 +404,7 @@ EncoderOutput DinoEncoder::forward(
             embedding_);
     });
     const bool half_attention = weights_.uses_int8_weights()
-        ? false : weights_.select_fp16(false);
+        ? true : weights_.select_fp16(false);
     const VkDeviceSize attention_score_bytes = half_attention
         ? std::uint64_t(heads_) * tokens *
             ((std::uint64_t(tokens) + 1) / 2) *

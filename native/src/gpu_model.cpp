@@ -136,8 +136,10 @@ GpuModel::GpuModel(const ModelFile& model, VulkanContext& context)
             source.elements,
         };
         context.upload(destination.buffer, source.data, bytes);
-        if (precision_ != inferbridge::native::Precision::int8 &&
-            use_half_weight(name)) {
+        const bool int8_mlp_weight =
+            precision_ == inferbridge::native::Precision::int8 &&
+            name.find(".mlp.") != std::string_view::npos;
+        if (use_half_weight(name) && !int8_mlp_weight) {
             const auto* floats =
                 static_cast<const float*>(source.data);
             std::vector<std::uint32_t> packed(
@@ -158,8 +160,7 @@ GpuModel::GpuModel(const ModelFile& model, VulkanContext& context)
                 packed.data(),
                 packed.size() * sizeof(std::uint32_t));
         }
-        if (precision_ == inferbridge::native::Precision::int8 &&
-            use_half_weight(name) && source.rank == 2 &&
+        if (int8_mlp_weight && use_half_weight(name) && source.rank == 2 &&
             source.dimensions[1] % 4u == 0u) {
             const auto quantized = inferbridge::native::quantize_int8_rows(
                 static_cast<const float*>(source.data),
@@ -203,7 +204,12 @@ void GpuModel::retain_transformer_precision(bool half_weight) {
         GpuTensor& tensor = entry.second;
         if (precision_ == inferbridge::native::Precision::int8) {
             context_.discard(tensor.buffer);
-            context_.discard(tensor.half_buffer);
+            if (name.find(".mlp.") != std::string_view::npos) {
+                context_.discard(tensor.half_buffer);
+            } else {
+                context_.discard(tensor.int8_buffer);
+                context_.discard(tensor.int8_scales);
+            }
         } else {
             context_.discard(
                 half_weight ? tensor.buffer : tensor.half_buffer);
