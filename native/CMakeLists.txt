@@ -15,6 +15,7 @@ endif()
 
 option(DAV1_BUILD_TESTS "Build the C ABI and preprocessing tests" ON)
 option(DAV1_WITH_VULKAN "Build the dependency-free Vulkan executor" ON)
+option(DAV1_WITH_METAL "Build the Apple Metal/MPSGraph executor" ${APPLE})
 option(DAV1_BUILD_TOOLS "Build native command-line tools" ON)
 
 if(DAV1_WITH_VULKAN)
@@ -117,6 +118,7 @@ endif()
 
 add_library(depth_anything_v1 SHARED
     src/dav1.cpp
+    src/executor_factory.cpp
     src/image.cpp
     src/inferbridge_harness.cpp
 )
@@ -135,15 +137,19 @@ target_compile_definitions(depth_anything_v1
         DAV1_BUILD_DLL
         INFERBRIDGE_HARNESS_BUILDING_LIBRARY
         $<$<BOOL:${DAV1_WITH_VULKAN}>:DAV1_WITH_VULKAN=1>
+        $<$<BOOL:${DAV1_WITH_METAL}>:DAV1_WITH_METAL=1>
 )
 set_target_properties(depth_anything_v1 PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
 )
 
+if(DAV1_WITH_VULKAN OR DAV1_WITH_METAL)
+    target_sources(depth_anything_v1 PRIVATE src/model.cpp)
+endif()
+
 if(DAV1_WITH_VULKAN)
     target_sources(depth_anything_v1 PRIVATE
-        src/model.cpp
         src/gpu_model.cpp
         src/encoder.cpp
         src/dpt.cpp
@@ -158,6 +164,16 @@ if(DAV1_WITH_VULKAN)
     if(WIN32)
         target_link_libraries(depth_anything_v1 PRIVATE d3d12 dxgi)
     endif()
+endif()
+
+if(DAV1_WITH_METAL)
+    if(NOT APPLE)
+        message(FATAL_ERROR "DAV1_WITH_METAL requires an Apple platform")
+    endif()
+    target_sources(depth_anything_v1 PRIVATE src/metal_executor.mm)
+    target_link_libraries(depth_anything_v1 PRIVATE
+        "-framework Foundation" "-framework Metal"
+        "-framework MetalPerformanceShadersGraph")
 endif()
 
 include(GNUInstallDirs)

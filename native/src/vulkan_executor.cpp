@@ -966,7 +966,7 @@ private:
 
 }  // namespace
 
-std::unique_ptr<Executor> create_executor(
+std::unique_ptr<Executor> create_vulkan_executor(
     const std::string& model_path,
     dav1_encoder encoder,
     int vulkan_device_index) {
@@ -977,7 +977,7 @@ std::unique_ptr<Executor> create_executor(
         model_path, encoder, vulkan_device_index);
 }
 
-GpuCapabilities probe_gpu_capabilities(
+GpuCapabilities probe_vulkan_gpu_capabilities(
     int vulkan_device_index) {
     if (vulkan_device_index < 0) {
         throw std::invalid_argument(

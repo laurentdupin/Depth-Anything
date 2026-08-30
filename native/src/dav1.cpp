@@ -90,14 +90,14 @@ dav1_status protect(Function&& function) {
 
 }  // namespace
 
-#if !defined(DAV1_WITH_VULKAN)
+#if !defined(DAV1_WITH_VULKAN) && !defined(DAV1_WITH_METAL)
 namespace dav1 {
 std::unique_ptr<Executor> create_executor(
     const std::string&,
     dav1_encoder,
-    int) {
+    int, std::uint32_t, const std::string&) {
     throw std::runtime_error(
-        "this DLL was built without Vulkan");
+        "this library was built without a GPU executor");
 }
 GpuCapabilities probe_gpu_capabilities(int) {
     return {};
@@ -189,13 +189,20 @@ dav1_status DAV1_CALL dav1_create(
     if (!supported_encoder(options->encoder)) {
         return fail(DAV1_STATUS_INVALID_ARGUMENT, "unsupported encoder");
     }
+    constexpr uint32_t supported_flags = DAV1_CREATE_FORCE_FP16 |
+        DAV1_CREATE_FORCE_INT8 | DAV1_CREATE_FORCE_VULKAN |
+        DAV1_CREATE_FORCE_METAL;
+    if ((options->flags & ~supported_flags) != 0u)
+        return fail(DAV1_STATUS_INVALID_ARGUMENT, "unsupported create flags");
     return protect([&] {
         auto result = std::make_unique<dav1_context>();
         result->executor = std::shared_ptr<dav1::Executor>(
             dav1::create_executor(
                 model_path_utf8,
                 options->encoder,
-                options->vulkan_device_index));
+                options->vulkan_device_index,
+                options->flags,
+                std::string()));
         *context = result.release();
     });
 }

@@ -102,11 +102,21 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    uint32_t flags = 0u;
+    const char* precision = getenv("DAV1_PRECISION");
+    if (precision != NULL && strcmp(precision, "fp16") == 0) {
+        flags = DAV1_CREATE_FORCE_FP16;
+    } else if (precision != NULL && strcmp(precision, "fp32") != 0) {
+        fprintf(stderr, "DAV1_PRECISION must be fp32 or fp16\n");
+        free(input);
+        free(output);
+        return 2;
+    }
     const dav1_create_options options = {
         sizeof(dav1_create_options),
         DAV1_ABI_VERSION,
         encoder,
-        0,
+        flags,
         0,
     };
     dav1_context* context = NULL;

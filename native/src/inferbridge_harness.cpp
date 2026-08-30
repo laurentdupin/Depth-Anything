@@ -292,9 +292,14 @@ ibrh_result IBRH_CALL model_load(
             runtime, IBRH_ERROR_INVALID_ARGUMENT,
             "DAV1 Size must be an integer from 1 to 4096");
     }
+    uint32_t create_flags = 0u;
+    if (precision == inferbridge::native::Precision::fp16)
+        create_flags |= DAV1_CREATE_FORCE_FP16;
+    else if (precision == inferbridge::native::Precision::int8)
+        create_flags |= DAV1_CREATE_FORCE_INT8;
     const dav1_create_options options{
         sizeof(options), DAV1_ABI_VERSION, encoder(path, parameters),
-        runtime->vulkan_device_index, 0u};
+        runtime->vulkan_device_index, create_flags};
     const dav1_status status =
         dav1_create(path.c_str(), &options, &model->context);
     if (status != DAV1_STATUS_OK) {
