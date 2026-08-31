@@ -171,6 +171,8 @@ if(DAV1_WITH_METAL)
         message(FATAL_ERROR "DAV1_WITH_METAL requires an Apple platform")
     endif()
     target_sources(depth_anything_v1 PRIVATE src/metal_executor.mm)
+    set_source_files_properties(src/metal_executor.mm PROPERTIES
+        COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(depth_anything_v1 PRIVATE
         "-framework Foundation" "-framework Metal"
         "-framework MetalPerformanceShadersGraph")

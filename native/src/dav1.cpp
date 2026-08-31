@@ -433,6 +433,54 @@ dav1_status DAV1_CALL dav1_submit_d3d12_texture_binding(
     });
 }
 
+dav1_status DAV1_CALL dav1_submit_metal_texture_binding(
+    dav1_context* context,
+    const dav1_metal_texture_binding_request* request,
+    dav1_gpu_job** job) {
+    if (context == nullptr || request == nullptr || job == nullptr) {
+        return fail(
+            DAV1_STATUS_INVALID_ARGUMENT,
+            "null Metal texture binding argument");
+    }
+    *job = nullptr;
+    if (request->struct_size < sizeof(*request) ||
+        request->abi_version != DAV1_ABI_VERSION) {
+        return fail(
+            DAV1_STATUS_INVALID_ARGUMENT,
+            "invalid Metal texture binding request");
+    }
+    return protect([&] {
+        dav1::GpuTextureSubmitRequest native;
+        native.shared_texture_handle =
+            static_cast<std::uintptr_t>(request->input_texture);
+        native.shared_texture_identity = native.shared_texture_handle;
+        native.width = request->input_width;
+        native.height = request->input_height;
+        native.pixel_format = static_cast<dav1_gpu_pixel_format>(
+            request->input_pixel_format);
+        native.input_size = request->input_size;
+        native.wait_fence_handle =
+            static_cast<std::uintptr_t>(request->wait_shared_event);
+        native.wait_fence_value = request->wait_value;
+        native.output_texture_handle =
+            static_cast<std::uintptr_t>(request->output_texture);
+        native.output_texture_identity = native.output_texture_handle;
+        native.output_width = request->output_width;
+        native.output_height = request->output_height;
+        native.signal_fence_handle =
+            static_cast<std::uintptr_t>(request->signal_shared_event);
+        native.signal_fence_value = request->signal_value;
+        native.source_frame_id = request->source_frame_id;
+        native.timestamp_ns = request->timestamp_ns;
+        auto result = std::make_unique<dav1_gpu_job>();
+        result->executor = context->executor;
+        result->source_frame_id = request->source_frame_id;
+        result->implementation =
+            context->executor->submit_gpu_texture(native);
+        *job = result.release();
+    });
+}
+
 dav1_status DAV1_CALL dav1_gpu_job_poll(
     const dav1_gpu_job* job,
     dav1_gpu_job_status* status) {

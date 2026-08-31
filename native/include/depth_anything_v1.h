@@ -174,6 +174,32 @@ typedef struct dav1_d3d12_texture_binding_request {
     uint64_t output_texture_identity;
 } dav1_d3d12_texture_binding_request;
 
+/*
+ * Apple in-process Metal texture binding. Every Objective-C object pointer is
+ * borrowed at submission and retained by the returned GPU job. The input wait
+ * event may be zero when the provider publishes only completed textures. The
+ * output shared event is required and is signaled after the R32Float texture
+ * contains the normalized, presentation-sized depth image.
+ */
+typedef struct dav1_metal_texture_binding_request {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint64_t input_texture;
+    uint32_t input_width;
+    uint32_t input_height;
+    uint32_t input_pixel_format;
+    int32_t input_size;
+    uint64_t wait_shared_event;
+    uint64_t wait_value;
+    uint64_t output_texture;
+    uint32_t output_width;
+    uint32_t output_height;
+    uint64_t signal_shared_event;
+    uint64_t signal_value;
+    uint64_t source_frame_id;
+    uint64_t timestamp_ns;
+} dav1_metal_texture_binding_request;
+
 typedef struct dav1_gpu_job_status {
     uint32_t struct_size;
     uint32_t state;
@@ -291,6 +317,11 @@ DAV1_API dav1_status DAV1_CALL dav1_submit_d3d12_texture(
 DAV1_API dav1_status DAV1_CALL dav1_submit_d3d12_texture_binding(
     dav1_context* context,
     const dav1_d3d12_texture_binding_request* request,
+    dav1_gpu_job** job);
+
+DAV1_API dav1_status DAV1_CALL dav1_submit_metal_texture_binding(
+    dav1_context* context,
+    const dav1_metal_texture_binding_request* request,
     dav1_gpu_job** job);
 
 DAV1_API dav1_status DAV1_CALL dav1_gpu_job_poll(
