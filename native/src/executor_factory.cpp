@@ -1,8 +1,21 @@
 #include "executor.h"
+#include "inferbridge/native_harness_precision.h"
 
 #include <stdexcept>
 
 namespace dav1 {
+
+namespace {
+
+inferbridge::native::Precision requested_precision(std::uint32_t flags) {
+    if ((flags & DAV1_CREATE_FORCE_INT8) != 0u)
+        return inferbridge::native::Precision::int8;
+    if ((flags & DAV1_CREATE_FORCE_FP16) != 0u)
+        return inferbridge::native::Precision::fp16;
+    return inferbridge::native::requested_precision();
+}
+
+}  // namespace
 
 std::unique_ptr<Executor> create_executor(
     const std::string& model_path, dav1_encoder encoder,
@@ -20,6 +33,8 @@ std::unique_ptr<Executor> create_executor(
         throw std::runtime_error("this runtime was built without Metal");
 #endif
 #if defined(DAV1_WITH_VULKAN)
+    const inferbridge::native::ScopedPrecisionRequest precision_scope(
+        requested_precision(flags));
     return create_vulkan_executor(model_path, encoder, vulkan_device_index);
 #else
     throw std::runtime_error("this runtime has no available executor");

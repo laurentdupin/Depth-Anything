@@ -186,8 +186,11 @@ private:
     VulkanPipeline linear_vec4_half_;
     VulkanPipeline linear_vec4_half_input_;
     VulkanPipeline linear_vec4_half_output_gelu_;
+    VulkanPipeline linear_vec4_residual_;
     VulkanPipeline linear_vec8_;
     VulkanPipeline linear_vec8_half_;
+    VulkanPipeline linear_vec8_half_input_;
+    VulkanPipeline linear_vec8_half_output_gelu_;
     VulkanPipeline linear_vec8_residual_;
     VulkanPipeline linear_vec16_;
     VulkanPipeline linear_vec16_half_;

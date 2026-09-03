@@ -37,6 +37,7 @@ public:
 
 private:
     void select_linear_tile(std::uint32_t rows);
+    void select_packed_half_mlp(std::uint32_t rows);
     bool select_half_attention(
         const VulkanBuffer& current,
         VulkanBuffer& normalized,
@@ -63,6 +64,7 @@ private:
     bool linear_vectorized_ = false;
     std::uint32_t linear_vector_tile_ = 0;
     bool linear_half_weight_ = false;
+    bool packed_half_mlp_ = false;
     std::unordered_map<std::uint32_t, bool> half_attention_by_tokens_;
 };
 
