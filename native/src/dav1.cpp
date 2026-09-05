@@ -777,3 +777,5 @@ dav1_status DAV1_CALL dav1_inferbridge_bgra8_u8(
 }
 
 }  // extern "C"
+
+#include "linux_capture.inl"
