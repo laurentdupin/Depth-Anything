@@ -363,6 +363,16 @@ DAV1_API dav1_status DAV1_CALL dav1_infer_bgr8(
     float* output_depth,
     size_t output_count);
 
+DAV1_API dav1_status DAV1_CALL dav1_infer_bgr8_processed(
+    dav1_context* context,
+    const uint8_t* bgr,
+    int32_t image_width,
+    int32_t image_height,
+    ptrdiff_t row_stride_bytes,
+    int32_t input_size,
+    float* output_depth,
+    size_t output_count);
+
 /*
  * Exact deployed InferBridge image contract. Input is interleaved BGRA8.
  * Bytes B, G, R are deliberately interpreted as model channels 0, 1, 2;

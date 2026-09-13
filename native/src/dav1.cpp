@@ -722,6 +722,40 @@ dav1_status DAV1_CALL dav1_infer_bgr8(
     });
 }
 
+dav1_status DAV1_CALL dav1_infer_bgr8_processed(
+    dav1_context* context,
+    const uint8_t* bgr,
+    int32_t image_width,
+    int32_t image_height,
+    ptrdiff_t row_stride_bytes,
+    int32_t input_size,
+    float* output_depth,
+    size_t output_count) {
+    if (context == nullptr || bgr == nullptr || output_depth == nullptr) {
+        return fail(DAV1_STATUS_INVALID_ARGUMENT, "null inference argument");
+    }
+    return protect([&] {
+        const dav1::ImageShape shape = dav1::network_shape(image_width, image_height, input_size);
+        const size_t required = static_cast<size_t>(shape.width) * shape.height;
+        if (output_count < required) throw ApiError(DAV1_STATUS_BUFFER_TOO_SMALL, "output buffer is too small");
+        dav1::preprocess_bgr8(
+            bgr,
+            image_width,
+            image_height,
+            row_stride_bytes,
+            shape,
+            context->image_scratch,
+            context->image_input);
+        context->executor->infer_resized(
+            context->image_input.data(),
+            shape.width,
+            shape.height,
+            output_depth,
+            shape.width,
+            shape.height);
+    });
+}
+
 dav1_status DAV1_CALL dav1_inferbridge_bgra8_u8(
     dav1_context* context,
     const uint8_t* bgra,

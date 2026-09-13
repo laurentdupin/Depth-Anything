@@ -22,7 +22,7 @@ void dav1_infer_linux_capture(
                            255.f
                      : 0.f;
   inferbridge::linux_capture::resize_nearest(depth.data(), shape.width,
-                                             shape.height, output, source.width,
-                                             source.height);
+                                             shape.height, output, upstream.width,
+                                             upstream.height);
 }
 #endif
