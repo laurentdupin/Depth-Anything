@@ -1,5 +1,8 @@
 #include "inferbridge/native_harness_queue_priority.h"
 #include <inferbridge/native_harness_json.h>
+#if defined(DAV1_WITH_VULKAN) && defined(_WIN32)
+#include <inferbridge/native_harness_vulkan_luid.h>
+#endif
 #include "inferbridge_harness.h"
 
 #include "depth_anything_v1.h"
@@ -148,22 +151,39 @@ bool parse_luid(const std::string& value, uint64_t& result) {
     return true;
 }
 
-bool device_index_for_luid(uint64_t luid, int32_t& device_index) {
+std::string device_index_for_luid(uint64_t luid, int32_t& device_index) {
+#if defined(DAV1_WITH_VULKAN) && defined(_WIN32)
+    // Find the selected GPU by LUID without opening any device, then probe
+    // that device alone: an unusable device listed earlier (an integrated
+    // GPU, say) must not hide it. See native_harness_vulkan_luid.h.
+    // Returns an empty string on success, otherwise why it failed.
+    namespace harness = inferbridge::native_harness;
+    int32_t index = 0;
+    const auto lookup = harness::vulkan_device_index_for_luid(luid, index);
+    if (lookup != harness::VulkanLuidLookup::Found)
+        return harness::vulkan_luid_lookup_error(lookup);
+    dav1_gpu_capabilities capabilities{
+        sizeof(capabilities), DAV1_ABI_VERSION, 0u, 0u, 0u, 0u};
+    if (dav1_probe_gpu_capabilities(index, &capabilities) != DAV1_STATUS_OK)
+        return harness::unusable_gpu_error(dav1_last_error());
+    if (capabilities.adapter_luid != luid)
+        return harness::unusable_gpu_error(nullptr);
+    device_index = index;
+    return {};
+#else
     for (int32_t index = 0; index < 32; ++index) {
         dav1_gpu_capabilities capabilities{
             sizeof(capabilities), DAV1_ABI_VERSION, 0u, 0u, 0u, 0u};
         const dav1_status status =
             dav1_probe_gpu_capabilities(index, &capabilities);
-        if (status != DAV1_STATUS_OK) {
-            if (index == 0) return false;
-            break;
-        }
+        if (status != DAV1_STATUS_OK) break;
         if (capabilities.adapter_luid == luid) {
             device_index = index;
-            return true;
+            return {};
         }
     }
-    return false;
+    return "could not match the requested GPU LUID";
+#endif
 }
 
 bool input_size(
@@ -454,12 +474,14 @@ ibrh_result IBRH_CALL runtime_create(
     std::string luid_text;
     if (json_string(device, "luid", luid_text) && !luid_text.empty()) {
         uint64_t luid = 0u;
-        if (!parse_luid(luid_text, luid) ||
-            !device_index_for_luid(luid, runtime->vulkan_device_index)) {
+        const std::string gpu_error = parse_luid(luid_text, luid)
+            ? device_index_for_luid(luid, runtime->vulkan_device_index)
+            : std::string("could not parse the requested GPU LUID");
+        if (!gpu_error.empty()) {
             delete runtime;
             return fail(
                 nullptr, IBRH_ERROR_UNSUPPORTED_CAPABILITY,
-                "DAV1 could not match the requested GPU LUID");
+                "DAV1 " + gpu_error);
         }
         runtime->adapter_luid = luid;
     }
